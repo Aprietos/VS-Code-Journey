@@ -1,0 +1,196 @@
+:root {
+  --bg: #0b0f14;
+  --bg-grid: #161e28;
+  --bg-panel: #11161d;
+  --bg-panel-alt: #1a212b;
+  --bg-panel-alt-hover: #232c38;
+  --border: #232b36;
+  --text: #dbe4ee;
+  --text-muted: #7c8ba1;
+  --accent: #38bdf8;
+  --line: #c7d1dc;
+  --line-fill: #141a22;
+  --input-color: #34d399;
+  --output-color: #f87171;
+  --pipe: #9aa7b8;
+  --handle: #fbbf24;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+#toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.6rem 1.2rem;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+#toolbar h1 {
+  font-family: 'Consolas', 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.tool-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+
+.tool-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.tool-group__label {
+  font-family: 'Consolas', 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-width: 520px;
+}
+
+.tools button {
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-panel-alt);
+  color: var(--text);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.tools button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--bg-panel-alt-hover);
+}
+
+#canvas-container {
+  flex: 1;
+  overflow: hidden;
+  background: var(--bg);
+  background-image:
+    linear-gradient(to right, var(--bg-grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--bg-grid) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+#canvas {
+  display: block;
+}
+
+.pid-element {
+  cursor: grab;
+}
+
+.pid-element:active {
+  cursor: grabbing;
+}
+
+/* Punt de connexió: un únic cercle amb fill sòlid, perquè tota la seva
+   àrea (no només la vora) respongui al clic. */
+.connection-point {
+  stroke: var(--bg);
+  stroke-width: 1.5;
+  cursor: crosshair;
+}
+
+.connection-point--input {
+  fill: var(--input-color);
+}
+
+.connection-point--output {
+  fill: var(--output-color);
+}
+
+.connection-point:hover {
+  fill: var(--accent);
+}
+
+/* Punt ja connectat a una canonada: no s'hi pot iniciar ni acabar una
+   segona connexió. */
+.connection-point--connected {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pipe-path {
+  fill: none;
+  stroke: var(--pipe);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.pipe-path--preview {
+  stroke: var(--accent);
+  stroke-dasharray: 5 4;
+  /* Evita que la línia de previsualització "tapi" el punt de connexió
+     de destí quan el cursor hi passa just per sobre en soltar el ratolí. */
+  pointer-events: none;
+}
+
+.pipe-handle {
+  fill: var(--handle);
+  stroke: var(--bg);
+  stroke-width: 1;
+  cursor: ew-resize;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 170px;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--bg-panel-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.context-menu li {
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+.context-menu li:hover {
+  background: var(--bg-panel-alt-hover);
+  color: var(--accent);
+}
