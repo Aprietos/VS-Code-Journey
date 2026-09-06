@@ -1,19 +1,21 @@
 :root {
-  --bg: #0b0f14;
-  --bg-grid: #161e28;
-  --bg-panel: #11161d;
-  --bg-panel-alt: #1a212b;
-  --bg-panel-alt-hover: #232c38;
-  --border: #232b36;
-  --text: #dbe4ee;
-  --text-muted: #7c8ba1;
-  --accent: #38bdf8;
-  --line: #c7d1dc;
-  --line-fill: #141a22;
-  --input-color: #34d399;
-  --output-color: #f87171;
-  --pipe: #9aa7b8;
-  --handle: #fbbf24;
+  --bg: #faf9f5;
+  --bg-grid: #ece8dd;
+  --bg-panel: #f5f3ec;
+  --bg-panel-alt: #ffffff;
+  --bg-panel-alt-hover: #f0ede3;
+  --border: #e3ddce;
+  --text: #1f1b16;
+  --text-muted: #83786a;
+  --accent: #d97757;
+  --accent-hover: #c3624443;
+  --accent-contrast: #ffffff;
+  --line: #3d3830;
+  --line-fill: #ffffff;
+  --input-color: #c3624a;
+  --output-color: #6a9873;
+  --pipe: #6b6355;
+  --handle: #d97757;
 }
 
 * {
@@ -23,7 +25,7 @@
 html, body {
   height: 100%;
   margin: 0;
-  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif;
   background: var(--bg);
 }
 
@@ -35,8 +37,8 @@ body {
 #toolbar {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
-  padding: 0.6rem 1.2rem;
+  gap: 0.7rem;
+  padding: 0.9rem 1.4rem;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
   color: var(--text);
@@ -44,14 +46,45 @@ body {
   overflow-y: auto;
 }
 
+.toolbar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
 #toolbar h1 {
-  font-family: 'Consolas', 'JetBrains Mono', monospace;
-  font-size: 0.85rem;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+  font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', ui-serif, serif;
+  font-size: 1.15rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
   margin: 0;
+}
+
+#clear-all {
+  padding: 0.4rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel-alt);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+#clear-all:hover {
+  border-color: var(--output-color);
+  color: var(--output-color);
+  background: var(--bg-panel-alt-hover);
+  box-shadow: 0 1px 2px rgba(195, 98, 74, 0.15);
+}
+
+#clear-all:active {
+  background: var(--accent-hover);
 }
 
 .tool-groups {
@@ -67,35 +100,43 @@ body {
 }
 
 .tool-group__label {
-  font-family: 'Consolas', 'JetBrains Mono', monospace;
-  font-size: 0.65rem;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   color: var(--text-muted);
 }
 
 .tools {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.45rem;
   max-width: 520px;
 }
 
 .tools button {
-  padding: 0.35rem 0.7rem;
+  padding: 0.4rem 0.85rem;
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: 8px;
   background: var(--bg-panel-alt);
   color: var(--text);
-  font-size: 0.8rem;
+  font-size: 0.82rem;
+  font-weight: 500;
   cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease,
+    box-shadow 0.12s ease;
 }
 
 .tools button:hover {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--bg-panel-alt-hover);
+  box-shadow: 0 1px 2px rgba(217, 119, 87, 0.15);
+}
+
+.tools button:active {
+  background: var(--accent-hover);
 }
 
 #canvas-container {
@@ -110,6 +151,11 @@ body {
 
 #canvas {
   display: block;
+  cursor: default;
+}
+
+#canvas.panning {
+  cursor: grabbing;
 }
 
 .pid-element {
@@ -128,11 +174,14 @@ body {
   cursor: crosshair;
 }
 
-.connection-point--input {
+/* Els rols es diuen "input"/"input2"/"output"/"output2"... segons quants
+   punts d'entrada o sortida tingui l'element; el selector per prefix els
+   agafa tots amb un únic color per família. */
+.connection-point[data-role^="input"] {
   fill: var(--input-color);
 }
 
-.connection-point--output {
+.connection-point[data-role^="output"] {
   fill: var(--output-color);
 }
 
@@ -163,6 +212,53 @@ body {
   pointer-events: none;
 }
 
+/* Marc de selecció: un requadre HTML (no SVG) posicionat amb
+   getBoundingClientRect() sobre l'element seleccionat, a l'estil d'una
+   imatge seleccionada en un editor de text. */
+.selection-frame {
+  position: fixed;
+  border: 1.5px dashed var(--accent);
+  pointer-events: none;
+  z-index: 500;
+}
+
+/* Requadre que es dibuixa en arrossegar amb el botó esquerre sobre el fons
+   buit del canvas, per seleccionar tots els elements que hi caiguin dins. */
+.marquee-select {
+  position: fixed;
+  border: 1px solid var(--accent);
+  background: rgba(217, 119, 87, 0.12);
+  pointer-events: none;
+  z-index: 500;
+}
+
+.resize-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  background: var(--accent);
+  border: 1.5px solid var(--accent-contrast);
+  border-radius: 2px;
+  pointer-events: auto;
+  box-shadow: 0 1px 2px rgba(61, 56, 48, 0.25);
+}
+
+.resize-handle--nw,
+.resize-handle--se {
+  cursor: nwse-resize;
+}
+
+.resize-handle--ne,
+.resize-handle--sw {
+  cursor: nesw-resize;
+}
+
+.resize-handle--nw { left: 0; top: 0; }
+.resize-handle--ne { left: 100%; top: 0; }
+.resize-handle--sw { left: 0; top: 100%; }
+.resize-handle--se { left: 100%; top: 100%; }
+
 .pipe-handle {
   fill: var(--handle);
   stroke: var(--bg);
@@ -179,8 +275,8 @@ body {
   list-style: none;
   background: var(--bg-panel-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(61, 56, 48, 0.15);
   font-size: 0.85rem;
   color: var(--text);
 }

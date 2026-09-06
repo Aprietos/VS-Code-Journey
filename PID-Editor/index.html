@@ -8,7 +8,10 @@
 </head>
 <body>
   <header id="toolbar">
-    <h1>Editor P&amp;ID</h1>
+    <div class="toolbar-top">
+      <h1>Editor P&amp;ID</h1>
+      <button id="clear-all" type="button">Neteja tot</button>
+    </div>
     <div class="tool-groups">
       <div class="tool-group">
         <span class="tool-group__label">Bàsics</span>
@@ -21,12 +24,22 @@
         <span class="tool-group__label">Transport pneumàtic</span>
         <div class="tools">
           <button data-tool="hopper">Tolva</button>
+          <button data-tool="gravityhopper">Tolva de gravetat</button>
+          <button data-tool="trouserhopper">Tolva pantaló</button>
           <button data-tool="airlock">Esclusa rotativa</button>
-          <button data-tool="filter">Filtre</button>
+          <button data-tool="filter">Filtre transport</button>
           <button data-tool="cyclone">Cicló</button>
+          <button data-tool="sieve">Cernedor</button>
           <button data-tool="screwfeeder">Dosificador sensefí</button>
           <button data-tool="bagdump">Descàrrega de sacs</button>
           <button data-tool="injector">Injector</button>
+          <button data-tool="diverter">Desviadora</button>
+        </div>
+      </div>
+      <div class="tool-group">
+        <span class="tool-group__label">Emmagatzematge</span>
+        <div class="tools">
+          <button data-tool="silo">Silo</button>
         </div>
       </div>
     </div>
