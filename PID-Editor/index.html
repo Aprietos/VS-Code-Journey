@@ -10,36 +10,51 @@
   <header id="toolbar">
     <div class="toolbar-top">
       <h1>Editor P&amp;ID</h1>
-      <button id="clear-all" type="button">Neteja tot</button>
+      <div class="toolbar-actions">
+        <button id="clear-all" type="button">Neteja tot</button>
+        <div class="history-controls">
+          <button id="undo-btn" type="button" class="history-btn" title="Desfer" aria-label="Desfer" disabled>
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+              <path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+          <button id="redo-btn" type="button" class="history-btn" title="Refer" aria-label="Refer" disabled>
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+              <path d="M5 12h14M13 18l6-6-6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+        </div>
+        <button id="lines-toggle" type="button" aria-expanded="false" aria-controls="lines-panel">Línies de transport</button>
+      </div>
     </div>
     <div class="tool-groups">
       <div class="tool-group">
-        <span class="tool-group__label">Bàsics</span>
+        <span class="tool-group__label">Elements</span>
         <div class="tools">
           <button data-tool="pump">Bomba</button>
+          <button data-tool="sieve">Cernedor</button>
+          <button data-tool="bagdump">Descàrrega de sacs</button>
+          <button data-tool="screwfeeder">Dosificador sensefí</button>
+          <button data-tool="airlock">Esclusa rotativa</button>
           <button data-tool="valve">Vàlvula</button>
         </div>
       </div>
       <div class="tool-group">
         <span class="tool-group__label">Transport pneumàtic</span>
         <div class="tools">
-          <button data-tool="hopper">Tolva</button>
-          <button data-tool="gravityhopper">Tolva de gravetat</button>
-          <button data-tool="trouserhopper">Tolva pantaló</button>
-          <button data-tool="airlock">Esclusa rotativa</button>
-          <button data-tool="filter">Filtre transport</button>
           <button data-tool="cyclone">Cicló</button>
-          <button data-tool="sieve">Cernedor</button>
-          <button data-tool="screwfeeder">Dosificador sensefí</button>
-          <button data-tool="bagdump">Descàrrega de sacs</button>
-          <button data-tool="injector">Injector</button>
           <button data-tool="diverter">Desviadora</button>
+          <button data-tool="filter">Filtre transport</button>
+          <button data-tool="injector">Injector</button>
         </div>
       </div>
       <div class="tool-group">
         <span class="tool-group__label">Emmagatzematge</span>
         <div class="tools">
           <button data-tool="silo">Silo</button>
+          <button data-tool="gravityhopper">Tolva de gravetat</button>
+          <button data-tool="hopper">Tolva filtre</button>
+          <button data-tool="trouserhopper">Tolva pantaló</button>
         </div>
       </div>
     </div>
@@ -48,6 +63,22 @@
   <main id="canvas-container">
     <svg id="canvas" width="100%" height="100%"></svg>
   </main>
+
+  <!-- Panell de línies de transport: sobreposat al canvas (mateix patró que
+       el menú contextual i els marcs de selecció, que també són HTML fix per
+       sobre de l'SVG), de manera que no cal tocar el layout existent. -->
+  <aside id="lines-panel" aria-labelledby="lines-panel-title" hidden>
+    <div class="lines-panel__head">
+      <h2 id="lines-panel-title" class="lines-panel__title">Línies de transport</h2>
+      <button id="lines-close" type="button" class="lines-panel__close" title="Tanca" aria-label="Tanca el panell">
+        <span aria-hidden="true">×</span>
+      </button>
+    </div>
+    <button id="lines-recalc" type="button" class="lines-panel__recalc">Recalcular</button>
+    <!-- El resultat del recàlcul s'anuncia sol als lectors de pantalla. -->
+    <p id="lines-note" class="lines-panel__note" role="status" aria-live="polite" hidden></p>
+    <ul id="lines-list" class="lines-panel__list"></ul>
+  </aside>
 
   <script src="script.js"></script>
 </body>

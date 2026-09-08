@@ -10,6 +10,12 @@
   --accent: #d97757;
   --accent-hover: #c3624443;
   --accent-contrast: #ffffff;
+  /* Variants fosques del mateix to, només per a TEXT petit: l'accent i el
+     gris apagats originals es queden per sota del 4.5:1 que demana la
+     WCAG AA sobre els fons clars (2.8:1 i 3.9:1 respectivament). Els
+     colors originals es mantenen intactes per a traços, vores i dibuix. */
+  --accent-text: #ad4e33;
+  --text-muted-strong: #736858;
   --line: #3d3830;
   --line-fill: #ffffff;
   --input-color: #c3624a;
@@ -63,12 +69,20 @@ body {
   margin: 0;
 }
 
-#clear-all {
+.toolbar-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
+}
+
+#clear-all,
+#lines-toggle {
   padding: 0.4rem 0.85rem;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-panel-alt);
-  color: var(--text-muted);
+  color: var(--text-muted-strong);
   font-size: 0.82rem;
   font-weight: 500;
   cursor: pointer;
@@ -83,8 +97,60 @@ body {
   box-shadow: 0 1px 2px rgba(195, 98, 74, 0.15);
 }
 
-#clear-all:active {
+#clear-all:active,
+#lines-toggle:active {
   background: var(--accent-hover);
+}
+
+#lines-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--bg-panel-alt-hover);
+  box-shadow: 0 1px 2px rgba(217, 119, 87, 0.15);
+}
+
+/* Desfer / Refer: parella minimalista de fletxes, a l'estil dels botons
+   "enrere"/"endavant" d'un navegador, ubicada sota "Neteja tot". */
+.history-controls {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.history-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel-alt);
+  color: var(--text-muted-strong);
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.history-btn svg {
+  display: block;
+}
+
+.history-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--bg-panel-alt-hover);
+  box-shadow: 0 1px 2px rgba(217, 119, 87, 0.15);
+}
+
+.history-btn:active:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+/* Apagat quan no hi ha res per desfer/refer. */
+.history-btn:disabled {
+  color: var(--border);
+  cursor: default;
+  opacity: 0.6;
 }
 
 .tool-groups {
@@ -96,7 +162,11 @@ body {
 .tool-group {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.55rem;
+  padding: 0.65rem 0.75rem 0.75rem;
+  background: var(--bg-panel-alt);
+  border: 1px solid var(--border);
+  border-radius: 10px;
 }
 
 .tool-group__label {
@@ -105,7 +175,9 @@ body {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-muted);
+  color: var(--accent-text);
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
 }
 
 .tools {
@@ -119,7 +191,7 @@ body {
   padding: 0.4rem 0.85rem;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--bg-panel-alt);
+  background: var(--bg-panel);
   color: var(--text);
   font-size: 0.82rem;
   font-weight: 500;
@@ -130,7 +202,7 @@ body {
 
 .tools button:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
   background: var(--bg-panel-alt-hover);
   box-shadow: 0 1px 2px rgba(217, 119, 87, 0.15);
 }
@@ -266,6 +338,189 @@ body {
   cursor: ew-resize;
 }
 
+.pipe-handle--vertical {
+  cursor: ns-resize;
+}
+
+/* Distintiu del rol (P1, C2...) dibuixat al costat de l'element. El traç
+   del mateix color que el fons, pintat per sota del farciment amb
+   paint-order, li fa d'halo perquè es llegeixi sobre la quadrícula. */
+.role-badge {
+  font-family: 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--accent-text);
+  stroke: var(--bg);
+  stroke-width: 3;
+  paint-order: stroke;
+  pointer-events: none;
+}
+
+/* ---- Panell de línies de transport ---- */
+#lines-panel {
+  position: fixed;
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 300px;
+  max-height: 70vh;
+  padding: 0.85rem;
+  background: var(--bg-panel-alt);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(61, 56, 48, 0.15);
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+/* Cal ser explícit: el display:flex de sobre guanyaria a la regla
+   [hidden] { display: none } del navegador. */
+#lines-panel[hidden] {
+  display: none;
+}
+
+.lines-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.lines-panel__title {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-text);
+}
+
+.lines-panel__close {
+  padding: 0 0.25rem;
+  border: none;
+  background: none;
+  color: var(--text-muted-strong);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.lines-panel__close:hover {
+  color: var(--accent-text);
+}
+
+.lines-panel__recalc {
+  padding: 0.35rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.lines-panel__recalc:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--bg-panel-alt-hover);
+}
+
+.lines-panel__note {
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-muted-strong);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.lines-panel__list {
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.line-item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.line-item:hover,
+.line-item.is-pinned {
+  border-color: var(--accent);
+  background: var(--bg-panel-alt-hover);
+}
+
+.line-item__title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.line-item__number {
+  font-weight: 600;
+  color: var(--accent-text);
+}
+
+.line-item__pair {
+  color: var(--text);
+}
+
+.line-item__path {
+  margin-top: 0.2rem;
+  color: var(--text-muted-strong);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+/* Ressaltat temporal del recorregut d'una línia. Només afegeix estil per
+   sobre del que ja hi ha (no substitueix res), de manera que treure la
+   classe deixa l'element exactament com estava. */
+.pipe-path--highlight {
+  stroke: var(--accent);
+  stroke-width: 3.25;
+}
+
+.pid-element--highlight {
+  filter: drop-shadow(0 0 3px var(--accent));
+}
+
+/* Focus visible per a qui navega amb el teclat. Es fa servir
+   :focus-visible i no :focus perquè el ratolí no deixi anells de focus
+   pel mig; l'aplicació no en tenia cap de visible. */
+button:focus-visible,
+.context-menu li:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+
+.context-menu li:focus-visible {
+  outline-offset: -2px;
+}
+
 .context-menu {
   position: fixed;
   z-index: 1000;
@@ -288,5 +543,5 @@ body {
 
 .context-menu li:hover {
   background: var(--bg-panel-alt-hover);
-  color: var(--accent);
+  color: var(--accent-text);
 }
