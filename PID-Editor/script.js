@@ -763,8 +763,11 @@ function beginResize(element, corner) {
 // Clicar fora de qualsevol element (i fora del propi marc de selecció o del
 // menú contextual) deselecciona i amaga el(s) marc(s). El requadre de
 // selecció (marquee-select) ja fa la seva pròpia crida a clearSelection()
-// en començar, així que no cal excloure'l aquí.
+// en començar, així que no cal excloure'l aquí. Només compta el botó
+// esquerre: amb el dret volem obrir el menú contextual (o, sobre fons buit,
+// no fer res més que això), no esborrar la selecció que hi hagi.
 window.addEventListener('mousedown', (event) => {
+  if (event.button !== 0) return;
   if (
     event.target.closest('.pid-element')
     || event.target.closest('.selection-frame')
@@ -1194,6 +1197,45 @@ function pasteClipboard(worldX, worldY) {
   selectMultiple(pasted);
 }
 
+// ---- Dreceres de teclat: eliminar / copiar / enganxar ----
+// "Suprimir" elimina tota la selecció actual, igual que "Eliminar
+// element"/"Suprimir tot" del menú contextual (vegeu buildElementMenuItems
+// més avall). Ctrl+C i Ctrl+V fan servir exactament el mateix porta-retalls
+// que ja fa servir "Copiar"/"Enganxar" en aquell menú; com que enganxar amb
+// teclat no ve d'un clic amb una posició concreta, es desplaça un petit
+// vector (PASTE_OFFSET) respecte a la posició original perquè la còpia no
+// quedi tapant exactament els elements copiats.
+const PASTE_OFFSET = 30;
+
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Delete') {
+    if (!selectedElements.size) return;
+    event.preventDefault();
+    [...selectedElements].forEach(removeElement);
+    pushHistory();
+    return;
+  }
+
+  const ctrlOrCmd = event.ctrlKey || event.metaKey;
+  if (!ctrlOrCmd) return;
+
+  if (event.key.toLowerCase() === 'c') {
+    if (!selectedElements.size) return;
+    event.preventDefault();
+    copyElements([...selectedElements]);
+    return;
+  }
+
+  if (event.key.toLowerCase() === 'v') {
+    if (!clipboard.length) return;
+    event.preventDefault();
+    const centerX = clipboard.reduce((sum, entry) => sum + entry.x, 0) / clipboard.length;
+    const centerY = clipboard.reduce((sum, entry) => sum + entry.y, 0) / clipboard.length;
+    pasteClipboard(centerX + PASTE_OFFSET, centerY + PASTE_OFFSET);
+    pushHistory();
+  }
+});
+
 // ---- Menú contextual ----
 // Construeix la llista d'opcions per a un element concret. Si l'element
 // forma part d'una selecció múltiple, les accions individuals (rotar,
@@ -1293,6 +1335,13 @@ window.addEventListener('keydown', (event) => {
 // "Enganxar" a la posició exacta del clic.
 canvas.addEventListener('contextmenu', (event) => {
   event.preventDefault();
+
+  // Si el clic dret interromp un requadre de selecció a mig arrossegar
+  // (per exemple perquè s'ha premut el botó dret abans de deixar anar
+  // l'esquerre), es cancel·la net: sense això podia quedar penjat al
+  // canvas per sempre (vegeu cancelMarquee).
+  cancelMarquee();
+
   const target = event.target.closest('.pid-element');
   if (target) {
     openContextMenu(event.clientX, event.clientY, buildElementMenuItems(target));
@@ -1401,13 +1450,24 @@ function onMarqueeMove(event) {
   updateMarqueeVisual(event.clientX, event.clientY);
 }
 
-function onMarqueeUp(event) {
+// Treu el requadre de selecció del DOM i deixa d'escoltar-ne
+// l'arrossegament, sense seleccionar res. Es fa servir tant per cancel·lar
+// un arrossegament interromput (vegeu el "contextmenu" del canvas) com com
+// a xarxa de seguretat abans de començar-ne un de nou: així, encara que
+// algun cop el "mouseup" no arribi a "window" (per exemple perquè un clic
+// dret l'ha interromput pel mig), mai no es pot quedar més d'un requadre
+// penjat permanentment al canvas.
+function cancelMarquee() {
+  if (!marqueeEl) return;
   window.removeEventListener('mousemove', onMarqueeMove);
   window.removeEventListener('mouseup', onMarqueeUp);
-
-  const rect = updateMarqueeVisual(event.clientX, event.clientY);
   marqueeEl.remove();
   marqueeEl = null;
+}
+
+function onMarqueeUp(event) {
+  const rect = updateMarqueeVisual(event.clientX, event.clientY);
+  cancelMarquee();
 
   const matched = [];
   viewport.querySelectorAll('.pid-element:not(.pipe)').forEach((element) => {
@@ -1422,6 +1482,10 @@ function onMarqueeUp(event) {
 canvas.addEventListener('mousedown', (event) => {
   if (event.button !== 0) return;
   if (event.target.closest('.pid-element')) return;
+
+  // Si per algun motiu ha quedat un requadre d'un arrossegament anterior
+  // sense netejar, es treu abans de començar-ne un de nou.
+  cancelMarquee();
 
   clearSelection();
   marqueeStartClient = { x: event.clientX, y: event.clientY };
@@ -1942,22 +2006,17 @@ let history = [];
 let historyIndex = -1;
 const MAX_HISTORY = 200;
 
+// Cada element es desa amb la seva posició (que viu a l'atribut transform)
+// i amb TOT el seu dataset tal com és, no amb una llista fixa de camps.
+// Això és el que fa que el format aguanti els canvis futurs del programa:
+// qualsevol data-* nou que s'afegeixi als elements (un codi d'equip, un
+// cabal, un color...) queda desat i restaurat sol, tant a l'historial de
+// desfer/refer com als arxius .pid.json, sense tocar aquestes funcions.
 function serializeState() {
   const elements = [];
   viewport.querySelectorAll('.pid-element:not(.pipe)').forEach((el) => {
     const { x, y } = getTranslate(el);
-    elements.push({
-      id: el.dataset.id,
-      type: el.dataset.type,
-      x,
-      y,
-      rotation: el.dataset.rotation,
-      flipped: el.dataset.flipped,
-      scale: el.dataset.scale,
-      // Camps opcionals: un element sense rol no els porta.
-      role: el.dataset.transportRole || null,
-      roleId: el.dataset.transportRoleId || null,
-    });
+    elements.push({ x, y, data: { ...el.dataset } });
   });
 
   const pipesData = pipes.map((pipe) => ({
@@ -1974,41 +2033,85 @@ function serializeState() {
   return { elements, pipes: pipesData, elementCount };
 }
 
+// Accepta tant el format actual ({ x, y, data }) com el que feien servir
+// les captures antigues (camps solts). Tenir-ho aquí, i no a la capa
+// d'arxius, vol dir que qualsevol arxiu desat amb una versió anterior del
+// programa es continua obrint sense migracions especials.
+function normalizeElementEntry(entry) {
+  if (entry.data) return entry;
+
+  const data = {
+    id: entry.id,
+    type: entry.type,
+    rotation: entry.rotation,
+    flipped: entry.flipped,
+    scale: entry.scale,
+  };
+  if (entry.role) {
+    data.transportRole = entry.role;
+    data.transportRoleId = entry.roleId;
+  }
+  return { x: entry.x, y: entry.y, data };
+}
+
 // Reconstrueix el canvas sencer a partir d'una captura (vegeu
 // serializeState): primer tots els elements (amb el seu identificador
 // original, perquè les canonades els puguin retrobar), després les
-// canonades que els connecten.
+// canonades que els connecten. Tot el que ve de fora (un arxiu que pot
+// haver estat desat per una versió més antiga o més nova del programa) es
+// tracta com a dubtós: si un element és d'un tipus que ja no existeix, o
+// una canonada apunta a un punt de connexió que ja no hi és, es descarta
+// només aquella peça i la resta del model s'obre igualment.
 function restoreState(state) {
   pipes.length = 0;
   viewport.replaceChildren();
   clearSelection();
 
   const byId = new Map();
-  state.elements.forEach((entry) => {
-    const g = buildBareElement(entry.type);
+  let maxIdNumber = 0;
+
+  (state.elements || []).forEach((raw) => {
+    const entry = normalizeElementEntry(raw);
+    const g = buildBareElement(entry.data.type);
     if (!g) return;
-    g.dataset.id = entry.id;
-    g.dataset.rotation = entry.rotation;
-    g.dataset.flipped = entry.flipped;
-    g.dataset.scale = entry.scale;
-    if (entry.role) {
-      g.dataset.transportRole = entry.role;
-      g.dataset.transportRoleId = entry.roleId;
-    }
+
+    Object.assign(g.dataset, entry.data);
     setElementPosition(g, entry.x, entry.y);
     updateRoleBadge(g);
     viewport.appendChild(g);
-    byId.set(entry.id, g);
+    byId.set(g.dataset.id, g);
+
+    // Els identificadors són del tipus "valve-7": es guarda el número més
+    // alt per no reutilitzar-lo mai en un element nou (vegeu més avall).
+    const idNumber = Number(String(g.dataset.id).split('-').pop());
+    if (Number.isFinite(idNumber)) maxIdNumber = Math.max(maxIdNumber, idNumber);
   });
 
-  state.pipes.forEach((p) => {
+  (state.pipes || []).forEach((p) => {
     const fromElement = byId.get(p.fromId);
     const toElement = byId.get(p.toId);
     if (!fromElement || !toElement) return;
-    buildPipe(fromElement, p.fromRole, p.fromDir, toElement, p.toRole, p.toDir, p.segments, p.freeValues);
+
+    const fromOffsets = connectionOffsets[fromElement.dataset.type];
+    const toOffsets = connectionOffsets[toElement.dataset.type];
+    if (!fromOffsets || !fromOffsets[p.fromRole]) return;
+    if (!toOffsets || !toOffsets[p.toRole]) return;
+
+    // Si l'arxiu no porta direccions o trams (o en porta menys dels
+    // mínims), es recalculen com si la canonada s'acabés de crear.
+    const fromDir = p.fromDir || getNaturalPortDirection(fromElement, p.fromRole);
+    const toDir = p.toDir || getNaturalPortDirection(toElement, p.toRole);
+    const segments = Math.max(Number(p.segments) || 0, minSegmentsFor(fromDir, toDir));
+    const freeValues = Array.isArray(p.freeValues) ? [...p.freeValues] : [];
+    while (freeValues.length < segments - 2) freeValues.push(0.5);
+
+    buildPipe(fromElement, p.fromRole, fromDir, toElement, p.toRole, toDir, segments, freeValues);
   });
 
-  elementCount = state.elementCount;
+  // El comptador mai no pot quedar per sota del número d'identificador més
+  // alt que hi ha al canvas: si ho fes, un element nou en reutilitzaria un
+  // i les canonades es confondrien en desar i tornar a obrir.
+  elementCount = Math.max(Number(state.elementCount) || 0, maxIdNumber);
 }
 
 function updateHistoryButtons() {
@@ -2045,6 +2148,277 @@ function redo() {
 
 undoButton.addEventListener('click', undo);
 redoButton.addEventListener('click', redo);
+
+// ---- Desar i obrir models (.pid.json) ----
+// L'arxiu és JSON pla i porta sempre tres coses: qui l'ha escrit (`format`),
+// amb quina versió de format (`version`) i l'estat sencer (`state`, la
+// mateixa captura que fa servir desfer/refer, vegeu serializeState). Que
+// sigui exactament la mateixa captura és el que garanteix que el que es
+// desa i el que es torna a obrir siguin idèntics: no hi ha dues llistes de
+// camps que puguin acabar divergint.
+//
+// Com evoluciona el format sense trencar els arxius que ja hi ha:
+//   · Afegir un data-* nou a un element o una propietat nova a una
+//     canonada NO demana tocar res: es desa i es restaura sol, i els
+//     arxius vells simplement no el porten (restoreState fa servir el
+//     valor per defecte que toqui).
+//   · Un canvi que sí que trenqui la compatibilitat (reanomenar un tipus
+//     d'element, canviar el significat d'un camp...) demana pujar
+//     FILE_VERSION i afegir una funció a MODEL_MIGRATIONS que porti un
+//     arxiu de la versió anterior a la nova. migrateModel les encadena
+//     totes, de manera que un arxiu de la versió 1 s'obre igual de bé
+//     quan el programa vagi per la 5.
+//   · Un arxiu d'una versió MÉS NOVA que la del programa s'intenta obrir
+//     igualment (el format només creix), avisant que pot faltar-hi coses.
+const FILE_FORMAT = 'pid-editor-model';
+const FILE_VERSION = 1;
+const FILE_EXTENSION = '.pid.json';
+
+const MODEL_MIGRATIONS = {
+  // 1: (model) => { ...porta un arxiu v1 a v2...; return model; },
+};
+
+const saveModelButton = document.getElementById('save-model');
+const fileNote = document.getElementById('file-note');
+
+// Arxiu on desa el botó "Desa". Es recorda durant la sessió: el primer cop
+// es tria (o es descarrega) i, a partir d'aquí, desar hi torna a escriure
+// a sobre sense preguntar res. Obrir un model arrossegant-lo també l'apunta
+// aquí, de manera que després es pot desar directament sobre el mateix
+// arxiu d'on venia.
+let modelFileHandle = null;
+
+function setFileNote(message, isError = false) {
+  fileNote.textContent = message;
+  fileNote.hidden = !message;
+  fileNote.classList.toggle('toolbar-note--error', Boolean(isError));
+}
+
+function defaultFileName() {
+  const stamp = new Date().toISOString().slice(0, 10);
+  return `model-${stamp}${FILE_EXTENSION}`;
+}
+
+function buildModelFile() {
+  return {
+    format: FILE_FORMAT,
+    version: FILE_VERSION,
+    savedAt: new Date().toISOString(),
+    // La vista es desa a part de l'estat: obrir un arxiu recupera
+    // l'enquadrament (pan i zoom) que tenia quan es va desar, però
+    // desfer/refer, que fan servir només `state`, no la mouen mai.
+    view: { x: viewX, y: viewY, scale: viewScale },
+    state: serializeState(),
+  };
+}
+
+function migrateModel(model) {
+  let current = model;
+  let version = Number(current.version) || 1;
+
+  while (version < FILE_VERSION) {
+    const migrate = MODEL_MIGRATIONS[version];
+    // Sense camí de migració es prova d'obrir l'arxiu tal com és: val més
+    // intentar-ho (restoreState és tolerant) que negar-s'hi en sec.
+    if (!migrate) break;
+    current = migrate(current);
+    version += 1;
+    current.version = version;
+  }
+
+  return current;
+}
+
+// Comprova, obre i deixa el model al canvas. Llança un error amb un text
+// pensat per ensenyar-lo tal qual si l'arxiu no serveix.
+function applyModelFile(text) {
+  let model;
+  try {
+    model = JSON.parse(text);
+  } catch {
+    throw new Error('L\'arxiu no es pot llegir: no és un JSON vàlid.');
+  }
+
+  if (!model || model.format !== FILE_FORMAT) {
+    throw new Error('L\'arxiu no és un model de l\'Editor P&ID.');
+  }
+  if (!model.state || !Array.isArray(model.state.elements)) {
+    throw new Error('L\'arxiu no conté cap model.');
+  }
+
+  const newer = (Number(model.version) || 1) > FILE_VERSION;
+  const migrated = migrateModel(model);
+
+  // Xarxa de seguretat: restaurar és destructiu (buida el canvas abans de
+  // reconstruir-lo). Si l'arxiu peta a mig obrir, es torna exactament al
+  // que hi havia en lloc de deixar l'usuari amb el canvas a mitges.
+  const backup = serializeState();
+  try {
+    restoreState(migrated.state);
+  } catch {
+    restoreState(backup);
+    throw new Error('L\'arxiu està malmès: no s\'ha pogut obrir (el canvas no s\'ha tocat).');
+  }
+
+  if (migrated.view) {
+    viewX = Number(migrated.view.x) || 0;
+    viewY = Number(migrated.view.y) || 0;
+    const scale = Number(migrated.view.scale) || 1;
+    viewScale = Math.min(MAX_VIEW_SCALE, Math.max(MIN_VIEW_SCALE, scale));
+    applyViewport();
+  }
+
+  // Obrir un model és una acció més: es pot desfer i es torna al que hi
+  // havia abans al canvas.
+  pushHistory();
+
+  return { newer };
+}
+
+// ---- Desar ----
+// Amb l'API d'accés a arxius (Chrome/Edge) el botó escriu de debò sobre
+// l'arxiu triat, i el navegador recorda l'última carpeta que s'hi va fer
+// servir (`id`), de manera que a partir del primer cop desar és un sol
+// clic. On aquesta API no hi és (Firefox, Safari), es descarrega l'arxiu
+// com sempre, que és el màxim que una pàgina web pot fer tota sola.
+async function ensureWritePermission(handle) {
+  const options = { mode: 'readwrite' };
+  if ((await handle.queryPermission(options)) === 'granted') return true;
+  return (await handle.requestPermission(options)) === 'granted';
+}
+
+function downloadModelFile(json, name) {
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function saveModel() {
+  const json = JSON.stringify(buildModelFile(), null, 2);
+
+  if (window.showSaveFilePicker) {
+    try {
+      if (!modelFileHandle) {
+        modelFileHandle = await window.showSaveFilePicker({
+          // Amb un `id` fix, el navegador torna a obrir el diàleg a la
+          // carpeta que es va fer servir l'últim cop.
+          id: 'pid-editor-model',
+          suggestedName: defaultFileName(),
+          types: [{
+            description: 'Model Editor P&ID',
+            accept: { 'application/json': [FILE_EXTENSION] },
+          }],
+        });
+      }
+
+      if (!(await ensureWritePermission(modelFileHandle))) {
+        setFileNote('No s\'ha pogut desar: permís d\'escriptura denegat.', true);
+        return;
+      }
+
+      const writable = await modelFileHandle.createWritable();
+      await writable.write(json);
+      await writable.close();
+      setFileNote(`Desat a ${modelFileHandle.name}`);
+      return;
+    } catch (error) {
+      // Cancel·lar el diàleg no és cap error: no s'ha de dir res.
+      if (error && error.name === 'AbortError') return;
+      // Qualsevol altre problema (permís revocat, arxiu mogut...): es
+      // descarta l'arxiu recordat i es descarrega, que sempre funciona.
+      modelFileHandle = null;
+    }
+  }
+
+  downloadModelFile(json, defaultFileName());
+  setFileNote('Model descarregat a la carpeta de descàrregues.');
+}
+
+saveModelButton.addEventListener('click', saveModel);
+
+// Ctrl+S / Cmd+S desa igual que el botó (i no deixa que el navegador obri
+// el seu "desa la pàgina").
+window.addEventListener('keydown', (event) => {
+  if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return;
+  event.preventDefault();
+  saveModel();
+});
+
+// ---- Obrir arrossegant l'arxiu sobre el canvas ----
+async function openDroppedFile(file, handle) {
+  try {
+    const { newer } = applyModelFile(await file.text());
+    // Si el navegador ens ha donat accés d'escriptura a l'arxiu arrossegat,
+    // el botó "Desa" hi tornarà a escriure a sobre directament.
+    modelFileHandle = handle || null;
+    setFileNote(newer
+      ? `Obert ${file.name} (desat amb una versió més nova: pot faltar-hi alguna cosa).`
+      : `Obert ${file.name}`);
+  } catch (error) {
+    setFileNote(error.message, true);
+  }
+}
+
+function hasFiles(event) {
+  return Boolean(event.dataTransfer) && [...event.dataTransfer.types].includes('Files');
+}
+
+['dragenter', 'dragover'].forEach((type) => {
+  canvasContainer.addEventListener(type, (event) => {
+    if (!hasFiles(event)) return;
+    // Cal aturar el comportament per defecte a cada dragover perquè el
+    // navegador accepti el "drop" en lloc d'obrir l'arxiu ell mateix.
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    canvasContainer.classList.add('drop-target');
+  });
+});
+
+canvasContainer.addEventListener('dragleave', (event) => {
+  // Passar per sobre d'un element de dins del canvas també dispara
+  // "dragleave": només compta sortir del contenidor de debò.
+  if (event.relatedTarget && canvasContainer.contains(event.relatedTarget)) return;
+  canvasContainer.classList.remove('drop-target');
+});
+
+canvasContainer.addEventListener('drop', async (event) => {
+  if (!hasFiles(event)) return;
+  event.preventDefault();
+  canvasContainer.classList.remove('drop-target');
+
+  const item = event.dataTransfer.items && event.dataTransfer.items[0];
+  const file = event.dataTransfer.files[0];
+  if (!file) return;
+
+  // getAsFileSystemHandle (Chrome/Edge) dona un identificador d'arxiu de
+  // debò, no només una còpia de lectura: és el que permet que després
+  // "Desa" escrigui sobre el mateix arxiu que s'ha arrossegat.
+  let handle = null;
+  if (item && item.getAsFileSystemHandle) {
+    try {
+      handle = await item.getAsFileSystemHandle();
+    } catch {
+      handle = null;
+    }
+  }
+
+  openDroppedFile(file, handle);
+});
+
+// Deixar anar un arxiu fora del canvas no ha de fer que el navegador hi
+// navegui i es perdi la feina no desada.
+window.addEventListener('dragover', (event) => {
+  if (hasFiles(event) && !canvasContainer.contains(event.target)) event.preventDefault();
+});
+window.addEventListener('drop', (event) => {
+  if (hasFiles(event) && !canvasContainer.contains(event.target)) event.preventDefault();
+});
 
 // Captura inicial (canvas buit), perquè hi hagi alguna cosa a la qual
 // tornar amb "Desfer" just després de la primera acció.

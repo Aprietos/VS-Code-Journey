@@ -77,7 +77,8 @@ body {
 }
 
 #clear-all,
-#lines-toggle {
+#lines-toggle,
+#save-model {
   padding: 0.4rem 0.85rem;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -98,15 +99,30 @@ body {
 }
 
 #clear-all:active,
-#lines-toggle:active {
+#lines-toggle:active,
+#save-model:active {
   background: var(--accent-hover);
 }
 
-#lines-toggle:hover {
+#lines-toggle:hover,
+#save-model:hover {
   border-color: var(--accent);
   color: var(--accent-text);
   background: var(--bg-panel-alt-hover);
   box-shadow: 0 1px 2px rgba(217, 119, 87, 0.15);
+}
+
+/* Resultat de l'última acció de desar/obrir, sota els botons. */
+.toolbar-note {
+  margin: 0;
+  max-width: 15rem;
+  color: var(--text-muted-strong);
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.toolbar-note--error {
+  color: var(--accent-text);
 }
 
 /* Desfer / Refer: parella minimalista de fletxes, a l'estil dels botons
@@ -219,6 +235,14 @@ body {
     linear-gradient(to right, var(--bg-grid) 1px, transparent 1px),
     linear-gradient(to bottom, var(--bg-grid) 1px, transparent 1px);
   background-size: 20px 20px;
+}
+
+/* Arrossegar un arxiu de model per sobre del canvas: es marca tot l'espai
+   com a zona on es pot deixar anar. El contorn va per dins (inset) perquè
+   no desplaci ni el canvas ni la quadrícula. */
+#canvas-container.drop-target {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background-color: var(--bg-panel-alt-hover);
 }
 
 #canvas {
