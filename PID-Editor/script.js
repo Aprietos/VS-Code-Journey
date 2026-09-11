@@ -1724,6 +1724,30 @@ const MAX_SEARCH_STEPS = 100000;
 // l'algoritme.
 const TRAVERSABLE_TYPES = new Set(['injector', 'sieve', 'valve', 'diverter']);
 
+// D'aquests tipus, els que el producte travessa ENCARA QUE tinguin un rol
+// assignat. Només l'injector: injecta el seu propi producte al corrent
+// d'aire, però no l'atura, de manera que per a una línia que hi passa pel
+// mig és un tram de canonada i res més.
+//
+// Això és el que fa que dos injectors en sèrie donin dues línies i no una:
+// la del segon (que arriba al punt de consum pel seu compte) i la del
+// primer, que travessa el segon fins al mateix punt de consum. Sense
+// aquesta excepció, el primer es quedava sense línia perquè el segon, en
+// ser punt de recollida, li tancava el camí.
+//
+// Compte: això val NOMÉS per a les línies de transport. La cerca de
+// l'element d'emmagatzematge aigües amunt (vegeu findUpstreamStorage a
+// process.js) continua tractant qualsevol element amb rol com a final de
+// recorregut, i ha de continuar sent així: el magatzem que alimenta el
+// segon injector no és el que alimenta el primer.
+const TRAVERSABLE_WITH_ROLE_TYPES = new Set(['injector']);
+
+// Cert si una ruta pot continuar a través d'aquest element.
+function canPassThrough(type, role) {
+  if (!TRAVERSABLE_TYPES.has(type)) return false;
+  return !role || TRAVERSABLE_WITH_ROLE_TYPES.has(type);
+}
+
 // Punts de connexió que comparteixen un mateix costat de l'element, per als
 // tipus en què el producte només pot anar d'un costat a l'altre. Dos punts
 // del MATEIX grup no comuniquen entre ells: una ruta que entri per un d'ells
@@ -1928,10 +1952,12 @@ function findTransportLines() {
         const nextRole = roleOf(link.otherId);
         if (nextRole === ROLE_CONSUMPTION) {
           record(link.otherId);
-        } else if (!nextRole && TRAVERSABLE_TYPES.has(typeOf(link.otherId))) {
-          // Sense rol i d'un tipus que es pot travessar: s'hi continua. Un
-          // altre punt de recollida seria terminal i no és destí vàlid, i
-          // un tipus no travessable tanca el camí aquí mateix.
+        } else if (canPassThrough(typeOf(link.otherId), nextRole)) {
+          // S'hi continua. El punt de consum d'abans és l'únic destí vàlid;
+          // un punt de recollida que es trobi pel mig no és mai destí, però
+          // sí que es pot travessar si és d'un tipus que ho permet (vegeu
+          // TRAVERSABLE_WITH_ROLE_TYPES). Un tipus no travessable, o un
+          // element amb rol que no sigui d'aquests, tanca el camí aquí.
           if (visitedElements.size > MAX_PATH_LENGTH) {
             truncated.pathLength = true;
           } else {

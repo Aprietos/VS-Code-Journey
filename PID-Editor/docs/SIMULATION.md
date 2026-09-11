@@ -187,7 +187,11 @@ coordenades.
 Regles:
 
 1. Els elements **amb rol** (`pickup`, `consumption`, `storage`) són finals
-   de recorregut: no s'hi passa a través.
+   de recorregut: no s'hi passa a través. **Sense excepcions**, i en
+   particular tampoc per als injectors: el magatzem que alimenta un segon
+   injector no és el que alimenta el primer. (Això és diferent de la
+   detecció de línies de transport, vegeu la nota al final d'aquesta
+   secció.)
 2. Els elements **sense rol** (vàlvules, escluses, tolves pantaló, ciclons…)
    es travessen lliurement.
 3. El primer element amb rol `storage` que es troba és la font. Es retorna
@@ -220,6 +224,25 @@ element ja no surt entre els candidats detectats).
 
 `choiceOverride` serveix perquè el panell pugui ensenyar el resultat d'una
 elecció que l'usuari acaba de fer i encara no ha desat.
+
+### Nota: injectors en sèrie
+
+Hi ha una asimetria **deliberada** entre els dos recorreguts del programa:
+
+| | Element amb rol trobat pel camí |
+| --- | --- |
+| `findUpstreamStorage` (aquí) | **Sempre** final de recorregut |
+| `findTransportLines` (`script.js`) | Final de recorregut, **excepte els injectors** |
+
+Un injector injecta el seu producte al corrent d'aire però no l'atura: per a
+una línia de transport que hi passa pel mig és un tram de canonada. Per això
+dos injectors en sèrie, tots dos punts de recollida, donen **dues** línies
+cap al mateix punt de consum: la del segon, i la del primer travessant el
+segon. Ho controla `TRAVERSABLE_WITH_ROLE_TYPES` a `script.js`.
+
+Per a la cerca del magatzem, en canvi, aturar-se és l'únic correcte: si es
+travessés el segon injector, se li atribuiria al primer un magatzem que no
+és el seu.
 
 **L'storage detectat i el producte heretat NO es desen.** Són informació
 derivada i es tornen a calcular. El que es desa és la decisió
