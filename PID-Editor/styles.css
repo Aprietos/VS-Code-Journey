@@ -1056,13 +1056,121 @@ select.process-field__input {
    targetes que la resta de l'aplicació.
    ===================================================================== */
 
+/* L'alçada la porta l'atribut style des de script.js (i es recorda entre
+   sessions); aquí només hi ha el valor de partida. */
 #sim-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: none;
   height: 340px;
   background: var(--ui-surface);
   border-top: 1px solid var(--ui-border);
+}
+
+/* Desancorat: la mateixa targeta, però flotant i moguda amb el ratolí.
+   Left, top, width i height els posa script.js. */
+#sim-panel.sim-panel--floating {
+  position: fixed;
+  z-index: 950;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+}
+
+/* Vora superior per canviar l'alçada. Sobresurt una mica cap amunt perquè
+   sigui fàcil d'agafar sense haver de clavar el cursor a la vora. */
+.sim-resize {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  z-index: 2;
+  cursor: ns-resize;
+}
+
+.sim-resize::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  width: 44px;
+  height: 3px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: var(--ui-border-strong);
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+
+.sim-resize:hover::after,
+.sim-resize:focus-visible::after,
+.sim-panel--resizing .sim-resize::after {
+  opacity: 1;
+}
+
+.sim-resize:focus-visible {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: -2px;
+}
+
+/* Cantonada per canviar amplada i alçada alhora. Només amb la finestra
+   desancorada: ancorada, l'amplada la mana la finestra del navegador. */
+.sim-grip {
+  display: none;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  z-index: 2;
+  cursor: nwse-resize;
+}
+
+.sim-panel--floating .sim-grip {
+  display: block;
+}
+
+.sim-grip::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--ui-border-strong);
+  border-bottom: 2px solid var(--ui-border-strong);
+  border-bottom-right-radius: 3px;
+}
+
+/* Mentre s'arrossega no hi ha d'haver ni transicions ni seleccions de text
+   pel mig. */
+.sim-panel--resizing,
+.sim-panel--dragging {
+  user-select: none;
+}
+
+.sim-panel--dragging {
+  cursor: grabbing;
+}
+
+/* Desancorada, la barra del títol és per on s'agafa la finestra. */
+.sim-panel--floating .sim-bar {
+  cursor: grab;
+}
+
+.sim-panel--floating .sim-bar .btn,
+.sim-panel--floating .sim-bar select,
+.sim-panel--floating .sim-bar label,
+.sim-panel--floating .sim-bar button {
+  cursor: default;
+}
+
+.sim-panel--floating .sim-bar .btn,
+.sim-panel--floating .sim-bar button {
+  cursor: pointer;
 }
 
 #sim-panel[hidden] {
@@ -1248,6 +1356,15 @@ select.process-field__input {
   box-shadow: inset 0 0 0 1px var(--ui-border);
 }
 
+/* Barrido amb línia assignada: ocupa temps i no mou producte, però passa
+   per una canonada concreta. Es distingeix del descans sense fer servir cap
+   color nou. */
+.sim-block--sweep {
+  background: var(--ui-surface);
+  color: var(--ui-primary-dark);
+  box-shadow: inset 0 0 0 1px var(--ui-primary);
+}
+
 /* Acció que s'ha quedat curta perquè el magatzem s'ha buidat. */
 .sim-block--short {
   background: var(--ui-danger-soft);
@@ -1289,12 +1406,18 @@ select.process-field__input {
 
 /* ---- Les tres columnes ---- */
 
+/* Quatre columnes, sempre. Cadascuna té una amplada mínima per sota de la
+   qual deixaria de llegir-se; si el panell és més estret que la suma, la
+   fila es desplaça de costat. Val més això que no pas reorganitzar-ho tot
+   (que deixaria la taula sense alçada) o aixafar els desplegables. */
 .sim-columns {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.05fr) minmax(0, 1.15fr);
+  grid-template-columns:
+    minmax(30rem, 2.4fr) minmax(10rem, 1fr) minmax(11rem, 1.05fr) minmax(12rem, 1.15fr);
   gap: var(--space-4);
   flex: 1;
   min-height: 0;
+  overflow-x: auto;
   padding: var(--space-2) var(--space-4) var(--space-4);
 }
 
@@ -1376,8 +1499,15 @@ select.process-field__input {
 
 .sim-table .process-field__input {
   height: 26px;
+  min-width: 5.5rem;
   padding: 0 var(--space-2);
   font-size: var(--size-small);
+}
+
+/* Per sota d'aquesta amplada la taula es desplaça de costat en comptes
+   d'aixafar-ne les columnes. */
+.sim-table {
+  min-width: 30rem;
 }
 
 .sim-row__duration {
@@ -1397,10 +1527,10 @@ select.process-field__input {
 
 /* Producte, rendiment i kg que el motor calcula per a aquesta acció. */
 .sim-row__estimate {
+  min-width: 8rem;
   color: var(--ui-text-secondary);
   font-size: 11px;
   line-height: 1.3;
-  white-space: nowrap;
 }
 
 .sim-row__estimate--short {
@@ -1518,30 +1648,6 @@ select.process-field__input {
 }
 
 /* ---- Finestres estretes ---- */
-
-@media (max-width: 1400px) {
-  .sim-columns {
-    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .sim-col:last-child {
-    grid-column: 1 / -1;
-  }
-
-  #sim-panel {
-    height: 380px;
-  }
-}
-
-@media (max-width: 1100px) {
-  .sim-columns {
-    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
-  }
-
-  #sim-panel {
-    height: 420px;
-  }
-}
 
 @media (max-width: 860px) {
   .sim-bar {
@@ -1667,10 +1773,19 @@ select.process-field__input {
 }
 
 /* ---- Flux del producte ---- */
+/* El radi i el gruix del traç els posa script.js a cada imatge, dividits
+   pel zoom, de manera que les partícules tenen sempre la mateixa mida a la
+   pantalla per molt que t'allunyis. */
 .sim-flow__dot {
   fill: var(--ui-primary-dark);
   stroke: var(--ui-canvas);
-  stroke-width: 0.8;
+}
+
+/* Barrido: boles blanques amb el contorn fosc. Es llegeixen com a "aire
+   que neteja", no com a producte. */
+.sim-flow__dot--sweep {
+  fill: #ffffff;
+  stroke: var(--ui-primary-dark);
 }
 
 /* ---- Informació en passar el ratolí ---- */

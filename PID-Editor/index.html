@@ -68,6 +68,13 @@
     <symbol id="i-down" viewBox="0 0 24 24">
       <path d="m6 10 6 6 6-6" />
     </symbol>
+    <symbol id="i-undock" viewBox="0 0 24 24">
+      <path d="M14 4h6v6" /><path d="m20 4-8 8" />
+      <path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" />
+    </symbol>
+    <symbol id="i-dock" viewBox="0 0 24 24">
+      <rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 14h18" />
+    </symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24">
       <path d="M20 11a8 8 0 0 0-13.7-5.2L3 9" /><path d="M3 4v5h5" />
       <path d="M4 13a8 8 0 0 0 13.7 5.2L21 15" /><path d="M21 20v-5h-5" />
@@ -205,6 +212,9 @@
        l'alçada que li cal. Tot el que hi surt ve de SimulationEngine; aquí
        no s'hi calcula ni un sol quilo. -->
   <section id="sim-panel" aria-labelledby="sim-title" hidden>
+    <!-- Vora superior: arrossegar-la fa el panell més alt o més baix. -->
+    <div id="sim-resize" class="sim-resize" role="separator" aria-orientation="horizontal"
+         tabindex="0" aria-label="Canvia l'alçada del panell"></div>
     <header class="sim-bar">
       <h2 id="sim-title" class="sim-bar__title">
         <svg class="icon" aria-hidden="true"><use href="#i-clock" /></svg>
@@ -237,6 +247,11 @@
       </label>
 
       <p id="sim-clock" class="sim-clock" role="status" aria-live="off">00:00 / 00:00</p>
+
+      <button id="sim-dock" type="button" class="lines-panel__close"
+              title="Desancora la finestra" aria-label="Desancora la finestra">
+        <svg class="icon" aria-hidden="true"><use id="sim-dock-icon" href="#i-undock" /></svg>
+      </button>
 
       <button id="sim-close" type="button" class="lines-panel__close" title="Tanca" aria-label="Tanca la simulació">
         <svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
@@ -297,6 +312,10 @@
         <div id="sim-summary" class="sim-summary"></div>
       </section>
     </div>
+
+    <!-- Cantonada per canviar amplada i alçada alhora. Només es veu quan
+         la finestra està desancorada. -->
+    <div id="sim-grip" class="sim-grip" aria-hidden="true"></div>
   </section>
 
   <!-- Panell de línies de transport: sobreposat al canvas (mateix patró que

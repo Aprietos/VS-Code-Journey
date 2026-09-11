@@ -136,7 +136,7 @@ el motor (§6).
 | --- | --- |
 | `order` | Posició dins la seqüència: 1, 2, 3… `normalizeSequence()` la renumera sola a partir de la posició real a la llista. |
 | `type` | Un de `ProcessModel.ACTION_TYPES`: `transport`, `rest` (Descans), `sweep` (Barrido), `startup` (Posada a règim). |
-| `lineId` | La línia de transport (la seva **signatura**, §4). Obligatòria a les accions de transport. |
+| `lineId` | La línia de transport (la seva **signatura**, §4). **Obligatòria** a les accions de transport i **opcional** al barrido, on només diu per quina canonada es fa la neteja. Als altres tipus s'ignora. |
 | `duration` | **En segons**, sempre més gran que 0. A la pantalla es veurà en minuts; el model no arrodoneix mai. |
 
 La seqüència **es desa amb el model**, a `state.process.sequence`.
@@ -442,6 +442,14 @@ començament o després del final no dispara mai.
   l'avís `capacity-exceeded` amb l'instant exacte en què passa. Una
   capacitat de 0 vol dir "encara no definida" i no es comprova.
 
+**El barrido pot portar línia però continua sense moure res.** El motor no
+la mira: `collectErrors()` surt abans d'arribar-hi per als tipus que no
+mouen producte, i `buildAction()` genera un tram sense moviment. La línia
+només arriba al resultat (`compiled.actions[].lineId`) perquè la capa visual
+pugui ensenyar quina canonada s'està netejant (§9.3). **Cap quilo de cap
+element no pot dependre d'un barrido**, i hi ha una prova que ho comprova
+comparant una seqüència amb barridos i la mateixa sense.
+
 **On afegir-ne més:** a `buildAction()` de `simulation.js`. Cada límit nou
 (pressió mínima, cabal màxim de la canonada, temps de posada a règim…) és un
 moment clau més i, per tant, un tall de tram més. El patró a seguir és el de
@@ -610,9 +618,61 @@ transport amb aquella línia. Així el motiu és exactament el mateix que veurà
 l'usuari en prémer Play, i la interfície no repeteix cap regla del motor.
 
 Les línies amb problemes surten desactivades al desplegable amb el motiu al
-tooltip, i el motiu també s'escriu a la columna «Estimació».
+tooltip, i el motiu també s'escriu a la columna «Estimació». **Al barrido
+no**: com que no mou producte, qualsevol línia li val, i també pot no tenir-ne
+cap.
 
-### 8.8 Durades i format
+#### Nom per defecte d'una línia
+
+En obrir la fitxa d'una línia **que no s'ha configurat mai**,
+`openLineProcessPanel()` hi posa `Línia N`, amb el número que la línia té ARA
+al panell lateral.
+
+És **un valor de partida, no un nom automàtic**: un cop desada la fitxa, el
+nom és de l'usuari i no es torna a tocar mai. Per això un recàlcul que canviï
+els números visibles **no renomena cap línia ja configurada**: el nom que hi
+ha desat ja no és el per defecte. La condició és `!ProcessModel.hasLine(...)`
+i prou.
+
+### 8.8 Mida i posició del panell
+
+El panell pot estar **ancorat** a baix o **desancorat**, convertit en una
+finestra flotant. No hi ha cap sistema de finestres: és el mateix element de
+sempre amb una classe més (`.sim-panel--floating`) i quatre propietats
+d'estil. Res del que hi ha a dins no se n'assabenta.
+
+L'estat viu a `simPanelLayout` `{ floating, height, width, left, top }` i
+l'estil del panell **sempre** en surt, via `applySimPanelLayout()`: no hi pot
+haver dues veritats.
+
+| Element | Què fa |
+| --- | --- |
+| `#sim-resize` | Vora superior. Ancorat, canvia l'alçada; desancorat, mou la vora de dalt i deixa la de baix on era. També respon a les fletxes del teclat. |
+| `#sim-grip` | Cantonada de baix a la dreta: amplada i alçada alhora. Només visible desancorat. |
+| `.sim-bar` | Desancorat, és per on s'agafa la finestra per moure-la. |
+| `#sim-dock` | Ancora i desancora. |
+
+`simPanelDrag(handle, className, onMove)` és l'arrossegament genèric que
+comparteixen tots tres: `pointerdown`, moure, deixar anar. La captura del
+punter va dins d'un `try`: si el navegador no la dona, l'arrossegament
+continua funcionant.
+
+**Límits.** Alçada mínima 220 px; ancorat, màxima `innerHeight − 160` perquè
+sempre quedi diagrama a la vista. Desancorada, `clampFloatingPosition()`
+garanteix que **la barra del títol no pot sortir mai de la pantalla**: és on
+hi ha Play, Pausa, Stop i el botó de tancar. També es torna a aplicar quan es
+canvia la mida de la finestra del navegador.
+
+**Es recorda** a `localStorage`, amb la clau `pid-editor.sim-panel`, dins
+d'un `try/catch`: si el navegador no deixa escriure-hi (finestra privada,
+permisos), simplement no es recorda entre sessions i no passa res més.
+
+**Les quatre columnes no es reorganitzen mai.** Cadascuna té una amplada
+mínima per sota de la qual deixaria de llegir-se i, si el panell és més
+estret que la suma, la fila es desplaça de costat. Apilar-les deixaria la
+taula sense alçada, que és pitjor.
+
+### 8.9 Durades i format
 
 L'usuari escriu **minuts**; es desa en **segons** (`minuts * 60`). El temps
 es mostra `mm:ss` amb `formatClock()`, i els quilos amb un decimal via
@@ -681,6 +741,17 @@ El recorregut el dona `simLineRoutes[lineId]`, que `buildSimulationScenario()`
 omple amb els objectes de `findTransportLines()`. No entra a l'escenari
 perquè el motor no en fa res.
 
+**Quina línia es destaca** ho decideix `simActiveVisual(state)`:
+
+- si el motor dona `state.activeLineId`, és un **transport** → mode
+  `'product'`;
+- si no, però l'acció actual és un **barrido amb línia** i encara no s'ha
+  acabat → aquella línia, mode `'sweep'`.
+
+El motor no marca el barrido com a actiu (no mou producte, i això no es toca);
+la línia arriba igualment a `compiled.actions[].lineId` i és el que permet
+ensenyar la canonada que s'està netejant.
+
 ### 9.4 Flux del producte
 
 Partícules recorrent les canonades de la línia activa, en el sentit
@@ -693,10 +764,22 @@ comparant `pipe.from.element` amb l'ordre del recorregut. Després
 
 **Límits de rendiment (tots deliberats):**
 
+**Mida constant de pantalla.** El radi i el gruix del traç es divideixen pel
+zoom (`SIM_DOT_RADIUS / viewScale`), de manera que les partícules es veuen
+igual de grosses tant si mires un element de prop com tot el projecte de cop
+— que és justament quan més falta fa que es vegin. Es recalcula a cada
+repintat i també des de `updateSimOverlayScale()`, que penja
+d'`applyViewport()` i per tant salta a cada pan i a cada zoom.
+
+**Dues menes de partícula.** `renderSimFlow(lineId, mode)`: `'product'`
+(fosques, transport) i `'sweep'` (blanques amb contorn fosc, barrido).
+Canviar de línia **o de mode** les torna a crear.
+
 | Límit | Valor | Per què |
 | --- | --- | --- |
-| Partícules per línia | `SIM_MAX_PARTICLES` = 28 | sostre dur, independentment de la llargada del recorregut |
-| Separació | `SIM_FLOW_SPACING` = 46 unitats | poques partícules en recorreguts curts |
+| Partícules per línia | `SIM_MAX_PARTICLES` = 22 | sostre dur, independentment de la llargada del recorregut |
+| Separació | `SIM_FLOW_SPACING` = 70 unitats | poques partícules en recorreguts curts |
+| Mida | `SIM_DOT_RADIUS` = 4,5 px de pantalla | visible a qualsevol zoom |
 | Línies animades alhora | 1 | l'execució és seqüencial: només hi ha una acció activa |
 | Amb `prefers-reduced-motion` | 0 | no es crea cap partícula |
 | Amb la reproducció aturada | no avancen | la fase només creix a `simTick()` |
@@ -956,3 +1039,8 @@ Anotades pel camí i **no** implementades a propòsit:
   motor ja el dona a `compiled.keyTimes`.
 - Fer servir el diàmetre i la longitud de les línies per a alguna cosa: avui
   es desen i es mostren, però cap càlcul no en depèn.
+- Donar física al barrido: avui ja sap per quina línia es fa (§9.3), o sigui
+  que arrossegar el producte que queda a la canonada seria el pas natural.
+  Es començaria per `MOVES_PRODUCT` a `simulation.js` (§6.5).
+- Recordar també quines línies de transport tenia fixades el panell lateral,
+  ara que el de simulació ja recorda mida i posició (§8.8).

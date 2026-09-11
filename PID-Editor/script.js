@@ -50,9 +50,9 @@ function applyViewport() {
   const transform = `translate(${viewX}, ${viewY}) scale(${viewScale})`;
   viewport.setAttribute('transform', transform);
   simOverlay.setAttribute('transform', transform);
-  // Les etiquetes de les barres van a mida fixa de pantalla: el seu
-  // contra-escalat depèn del zoom i s'ha de refer en canviar-lo.
-  updateSimLabelScale();
+  // Les barres i les partícules tenen parts a mida fixa de pantalla: el
+  // seu contra-escalat depèn del zoom i s'ha de refer en canviar-lo.
+  updateSimOverlayScale();
   // La malla de punts del fons és CSS, no SVG: cal moure-la i espaiar-la a
   // mà perquè continuï alineada amb el contingut.
   const spacing = dotSpacing();
@@ -2716,11 +2716,20 @@ function openLineProcessPanel(line) {
   const pair = `${ROLE_LABELS[ROLE_PICKUP]} ${line.pickupNumber} `
     + `→ ${ROLE_LABELS[ROLE_CONSUMPTION]} ${line.consumptionNumber}`;
 
+  const values = ProcessModel.getLine(signature);
+
+  // Nom per defecte, amb el número que la línia té ARA al panell. S'ofereix
+  // NOMÉS mentre la línia no s'ha configurat mai: un cop desada, el nom és
+  // de l'usuari i no es torna a tocar. Per això no es pot renomenar sola
+  // quan un recàlcul canvia els números: el nom ja no és el per defecte,
+  // és el que hi ha desat.
+  if (!ProcessModel.hasLine(signature)) values.name = `Línia ${line.number}`;
+
   openProcessPanel({
     kind: 'line',
     title: 'Línia de transport',
     subject: `Línia ${line.number} · ${pair}`,
-    values: ProcessModel.getLine(signature),
+    values,
     onSave: (values) => {
       ProcessModel.setLine(signature, values);
       paintLinesPanel();
@@ -3210,6 +3219,7 @@ window.addEventListener('drop', (event) => {
 
 const simPanel = document.getElementById('sim-panel');
 const simToggle = document.getElementById('time-calc');
+const simBar = document.querySelector('.sim-bar');
 const simCloseButton = document.getElementById('sim-close');
 const simPlayButton = document.getElementById('sim-play');
 const simPauseButton = document.getElementById('sim-pause');
@@ -3317,10 +3327,10 @@ function buildSimulationScenario() {
     const source = ProcessModel.resolvePickupSource(graph, line.pickupPointId, canCrossElement);
 
     scenario.lines[signature] = {
-      // Sense nom propi, el parell de rols identifica la línia i no canvia
-      // a cada recàlcul, cosa que el número de línia sí que faria.
-      name: config.name
-        || `${ROLE_PREFIX[ROLE_PICKUP]}${line.pickupNumber} → ${ROLE_PREFIX[ROLE_CONSUMPTION]}${line.consumptionNumber}`,
+      // Les línies configurades sempre porten nom (vegeu
+      // openLineProcessPanel); el de reserva només el veuen les que encara
+      // no s'han configurat, que tampoc no es poden fer servir.
+      name: config.name || `Línia ${line.number}`,
       throughput: config.throughput,
       diameter: config.diameter,
       length: config.length,
@@ -3511,6 +3521,7 @@ function renderSimSequence() {
   simEmpty.hidden = actions.length > 0;
   simTotal.textContent = `Total ${formatClock(actions.reduce((sum, a) => sum + a.duration, 0))}`;
 
+  const sweep = ProcessModel.ACTION_TYPES.SWEEP;
   const typeOptions = Object.values(ProcessModel.ACTION_TYPES)
     .map((type) => ({ value: type, label: actionLabel(type) }));
 
@@ -3528,14 +3539,17 @@ function renderSimSequence() {
       commitSequence(next);
     }));
 
-    // Línia: només per a les accions que mouen producte. Les línies que no
-    // es poden fer servir surten desactivades, amb el motiu al tooltip i,
-    // si són la que hi ha triada, també escrit a la columna del costat.
+    // Línia: la trien el transport i el barrido. Al transport és
+    // obligatòria i les línies que no serveixen surten desactivades amb el
+    // motiu; al barrido és opcional (només diu per quina canonada es fa la
+    // neteja) i, com que no mou producte, qualsevol línia hi val.
     const lineCell = document.createElement('td');
-    if (action.type === transport) {
-      const options = [{ value: '', label: '— Tria una línia —' }];
+    if (action.type === transport || action.type === sweep) {
+      const optional = action.type === sweep;
+      const options = [{ value: '', label: optional ? '— Sense línia —' : '— Tria una línia —' }];
+
       Object.keys(simScenario ? simScenario.lines : {}).forEach((id) => {
-        const problems = simLineProblems(id);
+        const problems = optional ? [] : simLineProblems(id);
         options.push({
           value: id,
           label: problems.length ? `${simLineName(id)} (no disponible)` : simLineName(id),
@@ -3545,6 +3559,7 @@ function renderSimSequence() {
           title: problems.length ? problems[0].message : '',
         });
       });
+
       lineCell.appendChild(simSelect(action.lineId, options, (value) => {
         const next = ProcessModel.getSequence();
         next[index].lineId = value;
@@ -3580,7 +3595,9 @@ function renderSimSequence() {
     // aquí. Si la línia té algun problema, hi va el motiu.
     const estimate = document.createElement('td');
     estimate.className = 'sim-row__estimate';
-    if (action.type !== transport) {
+    if (action.type === sweep) {
+      estimate.textContent = action.lineId ? 'Neteja · no mou producte' : '—';
+    } else if (action.type !== transport) {
       estimate.textContent = '—';
     } else {
       const problems = simLineProblems(action.lineId);
@@ -3648,7 +3665,9 @@ function renderSimTimeline() {
   simCompiled.actions.forEach((action) => {
     const block = document.createElement('div');
     block.className = 'sim-block';
-    if (!action.moving) block.classList.add('sim-block--idle');
+    if (action.type === ProcessModel.ACTION_TYPES.SWEEP && action.lineId) {
+      block.classList.add('sim-block--sweep');
+    } else if (!action.moving) block.classList.add('sim-block--idle');
     else if (!action.complete) block.classList.add('sim-block--short');
     block.style.left = `${(action.startTime / total) * 100}%`;
     block.style.width = `${(action.duration / total) * 100}%`;
@@ -3935,14 +3954,22 @@ const simSummaryHost = document.getElementById('sim-summary');
 // valor de lectura, no físic: no vol dir res sobre la velocitat real del
 // producte, només serveix perquè es vegi cap on va.
 const SIM_FLOW_SPEED = 150;
-const SIM_FLOW_SPACING = 46;     // separació entre partícules
-const SIM_MAX_PARTICLES = 28;    // sostre, per no carregar diagrames grans
+const SIM_FLOW_SPACING = 70;     // separació entre partícules
+const SIM_MAX_PARTICLES = 22;    // sostre, per no carregar diagrames grans
+
+// Mida de les partícules EN PÍXELS DE PANTALLA. El radi real es divideix
+// pel zoom a cada repintat, de manera que es veuen igual de grosses tant
+// si mires un element de prop com tot el projecte de cop, que és quan més
+// falta fa que es vegin.
+const SIM_DOT_RADIUS = 4.5;
+const SIM_DOT_STROKE = 1.4;
 
 let simFlowPhase = 0;
 let simBarNodes = new Map();     // id d'element -> nodes de la seva barra
 let simFlowNodes = [];
 let simFlowChain = null;
 let simFlowLineId = '';
+let simFlowMode = 'product';   // 'product' (transport) o 'sweep' (barrido)
 
 const simReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -4032,15 +4059,26 @@ function simBarGroup(elementId, bucket) {
   return { group, box, fill, level, label, kg, pct, bucket };
 }
 
-// Les etiquetes van a mida fixa de pantalla: es contra-escalen amb el zoom
-// perquè es puguin llegir tant si el diagrama és molt petit com molt gros.
-function updateSimLabelScale() {
-  if (!simBarNodes || !simBarNodes.size) return;
-  simBarNodes.forEach((bar) => {
-    const x = bar.box.x + bar.box.width / 2;
-    const y = bar.box.y + bar.box.height + 14 / viewScale;
-    bar.label.setAttribute('transform', `translate(${x}, ${y}) scale(${1 / viewScale})`);
-  });
+// Tot el que ha de tenir mida fixa de PANTALLA es recalcula aquí: les
+// etiquetes de les barres es contra-escalen i les partícules es redimensionen.
+// Es crida des d'applyViewport(), o sigui a cada pan i a cada zoom.
+function updateSimOverlayScale() {
+  if (simBarNodes && simBarNodes.size) {
+    simBarNodes.forEach((bar) => {
+      const x = bar.box.x + bar.box.width / 2;
+      const y = bar.box.y + bar.box.height + 14 / viewScale;
+      bar.label.setAttribute('transform', `translate(${x}, ${y}) scale(${1 / viewScale})`);
+    });
+  }
+
+  if (simFlowNodes && simFlowNodes.length) {
+    const radius = SIM_DOT_RADIUS / viewScale;
+    const stroke = SIM_DOT_STROKE / viewScale;
+    simFlowNodes.forEach((dot) => {
+      dot.setAttribute('r', radius);
+      dot.setAttribute('stroke-width', stroke);
+    });
+  }
 }
 
 function buildSimBars() {
@@ -4058,7 +4096,7 @@ function buildSimBars() {
     if (bar) simBarNodes.set(id, bar);
   });
 
-  updateSimLabelScale();
+  updateSimOverlayScale();
 }
 
 // Percentatge honest: si no hi ha capacitat definida no se n'inventa cap,
@@ -4164,9 +4202,10 @@ function clearSimFlow() {
   simFlowNodes = [];
   simFlowChain = null;
   simFlowLineId = '';
+  simFlowMode = 'product';
 }
 
-function renderSimFlow(lineId) {
+function renderSimFlow(lineId, mode) {
   // Sense línia activa, amb la preferència de reduir moviment o amb la
   // reproducció aturada no hi ha res a animar.
   if (!lineId || simReducedMotion.matches) {
@@ -4174,37 +4213,66 @@ function renderSimFlow(lineId) {
     return;
   }
 
-  if (lineId !== simFlowLineId) {
+  // Canviar de línia o passar de transportar a netejar vol partícules
+  // noves: les del barrido són blanques i les del producte, fosques.
+  if (lineId !== simFlowLineId || mode !== simFlowMode) {
     clearSimFlow();
     simFlowChain = buildSimFlowChain(lineId);
     simFlowLineId = lineId;
+    simFlowMode = mode;
 
     if (simFlowChain) {
       const count = Math.min(SIM_MAX_PARTICLES,
         Math.max(3, Math.round(simFlowChain.total / SIM_FLOW_SPACING)));
+      const className = mode === 'sweep' ? 'sim-flow__dot sim-flow__dot--sweep' : 'sim-flow__dot';
+
       for (let i = 0; i < count; i += 1) {
-        const dot = svgEl('circle', { class: 'sim-flow__dot', r: 2.6, cx: 0, cy: 0 });
+        const dot = svgEl('circle', { class: className, cx: 0, cy: 0 });
         simOverlay.appendChild(dot);
         simFlowNodes.push(dot);
       }
+      // Radi i gruix segons el zoom d'ara.
+      updateSimOverlayScale();
     }
   }
 
   if (!simFlowChain) return;
 
   const gap = simFlowChain.total / simFlowNodes.length;
+  const radius = SIM_DOT_RADIUS / viewScale;
+  const stroke = SIM_DOT_STROKE / viewScale;
+
   simFlowNodes.forEach((dot, index) => {
     const point = simFlowPoint(simFlowChain, simFlowPhase + index * gap);
     dot.setAttribute('cx', point.x);
     dot.setAttribute('cy', point.y);
+    dot.setAttribute('r', radius);
+    dot.setAttribute('stroke-width', stroke);
   });
 }
 
 // ---- Punt d'entrada de la capa visual ----
+// Quina línia s'ha de veure treballant i de quina manera. El transport el
+// diu el motor amb activeLineId; el barrido no mou producte i per tant el
+// motor no el marca com a actiu, però sí que en guarda la línia, que és el
+// que fa que es pugui ensenyar la canonada que s'està netejant.
+function simActiveVisual(state) {
+  if (state.activeLineId) return { lineId: state.activeLineId, mode: 'product' };
+
+  const action = state.action;
+  const sweeping = action
+    && action.type === ProcessModel.ACTION_TYPES.SWEEP
+    && action.lineId
+    && state.time < action.endTime;
+
+  return sweeping ? { lineId: action.lineId, mode: 'sweep' } : { lineId: '', mode: 'product' };
+}
+
 function renderSimVisuals(state) {
+  const active = simActiveVisual(state);
   renderSimBars(state);
-  renderSimActiveLine(state.activeLineId);
-  renderSimFlow(state.activeLineId);
+  renderSimActiveLine(active.lineId);
+  renderSimFlow(active.lineId, active.mode);
 }
 
 function clearSimVisuals() {
@@ -4400,7 +4468,8 @@ function simPipeTip(pipeElement, state) {
   if (!lineId) return null;
 
   const line = simScenario.lines[lineId];
-  const active = state.activeLineId === lineId;
+  const visual = simActiveVisual(state);
+  const active = visual.lineId === lineId;
 
   const nodes = [];
   const title = document.createElement('p');
@@ -4409,7 +4478,9 @@ function simPipeTip(pipeElement, state) {
   nodes.push(title);
 
   nodes.push(simTipRow('Rendiment', `${line.throughput} kg/h`));
-  nodes.push(simTipRow('Estat', active ? 'Treballant' : 'Aturada'));
+  nodes.push(simTipRow('Estat', active
+    ? (visual.mode === 'sweep' ? 'Fent barrido' : 'Treballant')
+    : 'Aturada'));
 
   // Temps acumulat: el que sumen les accions d'aquesta línia que ja han
   // passat, comptat fins a l'instant actual.
@@ -4463,6 +4534,207 @@ canvas.addEventListener('mousemove', (event) => {
 });
 
 canvas.addEventListener('mouseleave', hideSimTip);
+
+// ---- Mida i posició del panell de simulació ----
+// El panell pot estar ancorat a baix (l'alçada es canvia arrossegant-ne la
+// vora superior) o desancorat, convertit en una finestra flotant que es mou
+// i es redimensiona lliurement. La mida i la posició es recorden mentre el
+// programa és obert i, si el navegador ho permet, també entre sessions.
+//
+// No hi ha cap sistema de finestres: és el mateix element de sempre amb una
+// classe més i quatre propietats d'estil. Res del que hi ha a dins no se
+// n'assabenta.
+
+const simResizeHandle = document.getElementById('sim-resize');
+const simGrip = document.getElementById('sim-grip');
+const simDockButton = document.getElementById('sim-dock');
+const simDockIcon = document.getElementById('sim-dock-icon');
+
+const SIM_PANEL_MIN_HEIGHT = 220;
+const SIM_PANEL_MIN_WIDTH = 520;
+// Ancorat, el panell no es pot menjar tota la finestra: sempre ha de quedar
+// un tros de diagrama a la vista.
+const SIM_PANEL_TOP_GAP = 160;
+const SIM_PANEL_STORAGE_KEY = 'pid-editor.sim-panel';
+
+// L'estat viu aquí i l'estil del panell en surt sempre (vegeu
+// applySimPanelLayout), de manera que no hi pot haver dues veritats.
+let simPanelLayout = {
+  floating: false,
+  height: 340,
+  width: 900,
+  left: 120,
+  top: 120,
+};
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function maxDockedHeight() {
+  return Math.max(SIM_PANEL_MIN_HEIGHT, window.innerHeight - SIM_PANEL_TOP_GAP);
+}
+
+// Deixa sempre la barra del títol sencera dins de la pantalla: és on hi ha
+// Play, Pausa, Stop i el botó de tancar, i han de ser sempre accessibles.
+function clampFloatingPosition() {
+  const barHeight = 52;
+  const margin = 24;
+  simPanelLayout.width = clamp(simPanelLayout.width, SIM_PANEL_MIN_WIDTH,
+    Math.max(SIM_PANEL_MIN_WIDTH, window.innerWidth - 2 * margin));
+  simPanelLayout.height = clamp(simPanelLayout.height, SIM_PANEL_MIN_HEIGHT,
+    Math.max(SIM_PANEL_MIN_HEIGHT, window.innerHeight - 2 * margin));
+  simPanelLayout.left = clamp(simPanelLayout.left,
+    margin - simPanelLayout.width + 160, window.innerWidth - 160);
+  simPanelLayout.top = clamp(simPanelLayout.top, 0, window.innerHeight - barHeight);
+}
+
+function applySimPanelLayout() {
+  simPanel.classList.toggle('sim-panel--floating', simPanelLayout.floating);
+
+  if (simPanelLayout.floating) {
+    clampFloatingPosition();
+    simPanel.style.width = `${simPanelLayout.width}px`;
+    simPanel.style.height = `${simPanelLayout.height}px`;
+    simPanel.style.left = `${simPanelLayout.left}px`;
+    simPanel.style.top = `${simPanelLayout.top}px`;
+  } else {
+    simPanelLayout.height = clamp(simPanelLayout.height, SIM_PANEL_MIN_HEIGHT, maxDockedHeight());
+    simPanel.style.height = `${simPanelLayout.height}px`;
+    simPanel.style.width = '';
+    simPanel.style.left = '';
+    simPanel.style.top = '';
+  }
+
+  const docking = simPanelLayout.floating;
+  simDockIcon.setAttribute('href', docking ? '#i-dock' : '#i-undock');
+  simDockButton.title = docking ? 'Ancora a baix' : 'Desancora la finestra';
+  simDockButton.setAttribute('aria-label', simDockButton.title);
+}
+
+// Recordar-ho entre sessions és un extra: si el navegador no deixa escriure
+// (finestra privada, permisos), no passa res i es fa servir el de sempre.
+function saveSimPanelLayout() {
+  try {
+    localStorage.setItem(SIM_PANEL_STORAGE_KEY, JSON.stringify(simPanelLayout));
+  } catch { /* sense memòria entre sessions, i ja està */ }
+}
+
+function loadSimPanelLayout() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SIM_PANEL_STORAGE_KEY) || 'null');
+    if (!saved || typeof saved !== 'object') return;
+    ['height', 'width', 'left', 'top'].forEach((key) => {
+      if (Number.isFinite(saved[key])) simPanelLayout[key] = saved[key];
+    });
+    simPanelLayout.floating = Boolean(saved.floating);
+  } catch { /* el que hi hagués desat no serveix: es fa servir el per defecte */ }
+}
+
+// Arrossegament genèric: pointerdown, moure i deixar anar, amb el punter
+// capturat perquè no es perdi si el cursor surt de l'element.
+function simPanelDrag(handle, className, onMove) {
+  handle.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+
+    const start = {
+      x: event.clientX,
+      y: event.clientY,
+      layout: { ...simPanelLayout },
+    };
+
+    // La captura del punter no és imprescindible: si el navegador no la
+    // dona, l'arrossegament continua funcionant igual.
+    try { handle.setPointerCapture(event.pointerId); } catch { /* sense captura */ }
+    simPanel.classList.add(className);
+
+    const move = (moveEvent) => {
+      onMove(moveEvent.clientX - start.x, moveEvent.clientY - start.y, start.layout);
+      applySimPanelLayout();
+    };
+
+    const end = (endEvent) => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', end);
+      handle.removeEventListener('pointercancel', end);
+      try {
+        if (handle.hasPointerCapture(endEvent.pointerId)) handle.releasePointerCapture(endEvent.pointerId);
+      } catch { /* ja no la teníem */ }
+      simPanel.classList.remove(className);
+      saveSimPanelLayout();
+    };
+
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  });
+}
+
+// Vora superior: ancorat puja i baixa el sostre del panell; desancorat mou
+// la vora de dalt i deixa la de baix on era.
+simPanelDrag(simResizeHandle, 'sim-panel--resizing', (dx, dy, start) => {
+  if (start.floating) {
+    const bottom = start.top + start.height;
+    const top = clamp(start.top + dy, 0, bottom - SIM_PANEL_MIN_HEIGHT);
+    simPanelLayout.top = top;
+    simPanelLayout.height = bottom - top;
+  } else {
+    simPanelLayout.height = clamp(start.height - dy, SIM_PANEL_MIN_HEIGHT, maxDockedHeight());
+  }
+});
+
+// Cantonada de baix a la dreta: amplada i alçada alhora (només flotant).
+simPanelDrag(simGrip, 'sim-panel--resizing', (dx, dy, start) => {
+  simPanelLayout.width = start.width + dx;
+  simPanelLayout.height = start.height + dy;
+});
+
+// La barra del títol mou la finestra, però no quan s'ha clicat un control.
+simPanelDrag(simBar, 'sim-panel--dragging', (dx, dy, start) => {
+  if (!start.floating) return;
+  simPanelLayout.left = start.left + dx;
+  simPanelLayout.top = start.top + dy;
+});
+
+// Amb el teclat: les fletxes amunt i avall canvien l'alçada de vint en vint.
+simResizeHandle.addEventListener('keydown', (event) => {
+  const step = { ArrowUp: 20, ArrowDown: -20 }[event.key];
+  if (step === undefined) return;
+
+  event.preventDefault();
+  simPanelLayout.height = clamp(simPanelLayout.height + step, SIM_PANEL_MIN_HEIGHT,
+    simPanelLayout.floating ? window.innerHeight : maxDockedHeight());
+  applySimPanelLayout();
+  saveSimPanelLayout();
+});
+
+// Ancorar i desancorar. En desancorar per primer cop, la finestra es
+// col·loca on era el panell, de manera que no salta enlloc.
+simDockButton.addEventListener('click', () => {
+  if (!simPanelLayout.floating) {
+    // La finestra surt una mica més estreta que el panell ancorat, i no a
+    // l'amplada màxima: si hi sortís, la cantonada de redimensionar no
+    // tindria cap marge per créixer.
+    const box = simPanel.getBoundingClientRect();
+    simPanelLayout.width = Math.max(SIM_PANEL_MIN_WIDTH, Math.round(box.width * 0.86));
+    simPanelLayout.left = Math.round((window.innerWidth - simPanelLayout.width) / 2);
+    simPanelLayout.top = Math.max(0, Math.round(box.top) - 24);
+  }
+
+  simPanelLayout.floating = !simPanelLayout.floating;
+  applySimPanelLayout();
+  saveSimPanelLayout();
+});
+
+// Si la finestra del navegador es fa petita, la flotant no s'hi pot quedar
+// fora i l'ancorada no pot ser més alta del que hi cap.
+window.addEventListener('resize', () => {
+  if (!simPanel.hidden) applySimPanelLayout();
+});
+
+loadSimPanelLayout();
+applySimPanelLayout();
 
 // Captura inicial (canvas buit), perquè hi hagi alguna cosa a la qual
 // tornar amb "Desfer" just després de la primera acció.
