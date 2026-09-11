@@ -502,4 +502,54 @@ Test.case('dues compilacions del mateix escenari donen exactament el mateix', ()
   );
 });
 
+// =====================================================================
+Test.group('La seqüència es desa amb el model');
+
+Test.case('surt a serialize() i torna a load()', () => {
+  ProcessModel.clear();
+  ProcessModel.setSequence([
+    transport('L', minutes(7)),
+    rest(minutes(2)),
+  ]);
+
+  const saved = ProcessModel.serialize();
+  assert.equal(saved.sequence.length, 2, 'accions desades');
+  assert.equal(saved.sequence[0].duration, 420, 'durada en segons');
+
+  ProcessModel.clear();
+  assert.equal(ProcessModel.getSequence().length, 0, 'després de buidar');
+
+  ProcessModel.load(saved);
+  assert.deepEqual(ProcessModel.getSequence(), saved.sequence, 'seqüència recuperada');
+});
+
+Test.case('un model d\'abans que es desés obre amb la seqüència buida', () => {
+  ProcessModel.setSequence([transport('L', minutes(3))]);
+  ProcessModel.load({ elements: {}, lines: {} });
+  assert.equal(ProcessModel.getSequence().length, 0, 'seqüència');
+});
+
+Test.case('una seqüència desordenada o incompleta es normalitza en obrir-la', () => {
+  ProcessModel.load({
+    elements: {},
+    lines: {},
+    sequence: [
+      { type: 'rest', duration: 60, order: 9 },
+      { type: 'transport', lineId: 'L', duration: 120 },
+    ],
+  });
+
+  const sequence = ProcessModel.getSequence();
+  assert.deepEqual(sequence.map((a) => a.order), [1, 2], 'ordre renumerat');
+  assert.equal(sequence[0].lineId, '', 'camp que faltava, amb el valor per defecte');
+  assert.equal(sequence[1].duration, 120, 'durada conservada');
+});
+
+Test.case('getSequence() retorna una còpia: tocar-la no toca el model', () => {
+  ProcessModel.setSequence([transport('L', minutes(5))]);
+  const copy = ProcessModel.getSequence();
+  copy[0].duration = 999;
+  assert.equal(ProcessModel.getSequence()[0].duration, 300, 'durada al model');
+});
+
 Test.run();

@@ -96,11 +96,9 @@ const ProcessModel = (() => {
     [ACTION_TYPES.STARTUP]: 'Posada a règim',
   };
 
-  // La seqüència viu en memòria i, de moment, NO es desa a l'arxiu del
-  // model: desar-la és feina de l'etapa següent, que l'afegirà a
-  // serialize() i a load() (vegeu docs/SIMULATION.md). Per això load() i
-  // clear() la buiden: mentre no es desi, obrir un model no la pot
-  // restaurar i val més quedar-se sense que no pas amb la d'un altre model.
+  // La seqüència es desa amb el model, com la resta: surt a serialize() i
+  // torna a load(). Un arxiu d'abans que es desés no en porta, i llavors
+  // queda buida, que és el que toca.
   let sequence = [];
 
   function createAction(values) {
@@ -368,11 +366,10 @@ const ProcessModel = (() => {
     // fora es tracta com a dubtós (un arxiu pot venir d'una versió
     // anterior o estar tocat a mà): el que no encaixi s'ignora i la resta
     // s'obre igualment.
-    // La seqüència d'accions NO hi surt: desar-la a l'arxiu és feina de
-    // l'etapa següent. Quan toqui, s'hi afegeix aquí i a load().
     serialize: () => ({
       elements: JSON.parse(JSON.stringify(store.elements)),
       lines: JSON.parse(JSON.stringify(store.lines)),
+      sequence: sequence.map((action) => ({ ...action })),
     }),
 
     load: (data) => {
@@ -388,6 +385,11 @@ const ProcessModel = (() => {
           if (entry && typeof entry === 'object') store[bucket][id] = { ...entry };
         });
       });
+
+      // normalizeSequence renumera l'ordre i posa els valors per defecte al
+      // que falti, de manera que un arxiu tocat a mà no pot deixar la
+      // seqüència en un estat estrany.
+      if (Array.isArray(data.sequence)) sequence = normalizeSequence(data.sequence);
     },
 
     clear: () => { store = { elements: {}, lines: {} }; sequence = []; },

@@ -50,6 +50,24 @@
       <circle cx="18" cy="18" r="2.5" />
       <path d="m8.3 10.8 7.4-3.6" /><path d="m8.3 13.2 7.4 3.6" />
     </symbol>
+    <symbol id="i-play" viewBox="0 0 24 24">
+      <path d="M8 5.5v13l11-6.5z" />
+    </symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24">
+      <path d="M9 5v14" /><path d="M15 5v14" />
+    </symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24">
+      <rect x="6" y="6" width="12" height="12" rx="1.5" />
+    </symbol>
+    <symbol id="i-add" viewBox="0 0 24 24">
+      <path d="M12 5v14" /><path d="M5 12h14" />
+    </symbol>
+    <symbol id="i-up" viewBox="0 0 24 24">
+      <path d="m6 14 6-6 6 6" />
+    </symbol>
+    <symbol id="i-down" viewBox="0 0 24 24">
+      <path d="m6 10 6 6 6-6" />
+    </symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24">
       <path d="M20 11a8 8 0 0 0-13.7-5.2L3 9" /><path d="M3 4v5h5" />
       <path d="M4 13a8 8 0 0 0 13.7 5.2L21 15" /><path d="M21 20v-5h-5" />
@@ -143,11 +161,9 @@
     </div>
 
     <div class="app-toolbar__end">
-      <!-- El motor de càlcul ja existeix (simulation.js), però la pantalla
-           per fer-lo servir encara no. El botó hi és, amb el seu lloc
-           reservat i ben visible, i desactivat fins que la tingui. -->
       <button id="time-calc" type="button" class="btn btn--feature"
-              title="Disponible properament" aria-label="Càlcul de temps (disponible properament)" disabled>
+              title="Seqüència d'operacions i simulació en el temps"
+              aria-expanded="false" aria-controls="sim-panel">
         <svg class="icon" aria-hidden="true"><use href="#i-clock" /></svg>
         Càlcul de temps
       </button>
@@ -181,6 +197,101 @@
          aquí i no a la capçalera perquè la capçalera es mantingui neta. -->
     <p id="file-note" class="file-note" role="status" aria-live="polite" hidden></p>
   </main>
+
+
+  <!-- Interfície de simulació. Va acoblada a baix i no flotant com els
+       altres panells: hi ha d'entrar un cronograma horitzontal i tres
+       columnes d'informació, i així no tapa el diagrama sinó que li cedeix
+       l'alçada que li cal. Tot el que hi surt ve de SimulationEngine; aquí
+       no s'hi calcula ni un sol quilo. -->
+  <section id="sim-panel" aria-labelledby="sim-title" hidden>
+    <header class="sim-bar">
+      <h2 id="sim-title" class="sim-bar__title">
+        <svg class="icon" aria-hidden="true"><use href="#i-clock" /></svg>
+        Càlcul de temps
+      </h2>
+
+      <div class="sim-transport" role="group" aria-label="Reproducció">
+        <button id="sim-play" type="button" class="btn btn--primary" title="Reprodueix">
+          <svg class="icon" aria-hidden="true"><use href="#i-play" /></svg>
+          Play
+        </button>
+        <button id="sim-pause" type="button" class="btn btn--outline" title="Pausa" aria-label="Pausa" disabled>
+          <svg class="icon" aria-hidden="true"><use href="#i-pause" /></svg>
+        </button>
+        <button id="sim-stop" type="button" class="btn btn--outline" title="Atura i torna al principi" aria-label="Atura" disabled>
+          <svg class="icon" aria-hidden="true"><use href="#i-stop" /></svg>
+        </button>
+      </div>
+
+      <label class="sim-speed">
+        <span class="sim-speed__label">Velocitat</span>
+        <select id="sim-speed" class="process-field__input">
+          <option value="0.25">0,25x</option>
+          <option value="0.5">0,5x</option>
+          <option value="1" selected>1x</option>
+          <option value="2">2x</option>
+          <option value="5">5x</option>
+          <option value="10">10x</option>
+        </select>
+      </label>
+
+      <p id="sim-clock" class="sim-clock" role="status" aria-live="off">00:00 / 00:00</p>
+
+      <button id="sim-close" type="button" class="lines-panel__close" title="Tanca" aria-label="Tanca la simulació">
+        <svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
+      </button>
+    </header>
+
+    <!-- Errors i avisos de la validació del motor. -->
+    <div id="sim-issues" class="sim-issues" role="status" aria-live="polite" hidden></div>
+
+    <!-- Cronograma: un bloc per acció, proporcional a la seva durada, amb
+         el cursor arrossegable per sobre. -->
+    <div class="sim-timeline">
+      <div id="sim-ticks" class="sim-timeline__ticks"></div>
+      <div id="sim-track" class="sim-timeline__track" role="slider" tabindex="0"
+           aria-label="Cursor de temps" aria-valuemin="0" aria-valuenow="0" aria-valuemax="0">
+        <div id="sim-blocks" class="sim-timeline__blocks"></div>
+        <div id="sim-cursor" class="sim-timeline__cursor"></div>
+      </div>
+    </div>
+
+    <div class="sim-columns">
+      <!-- Editor de seqüència -->
+      <section class="sim-col sim-col--sequence" aria-labelledby="sim-seq-title">
+        <div class="sim-col__head">
+          <h3 id="sim-seq-title" class="lines-panel__subtitle">Seqüència</h3>
+          <span id="sim-total" class="sim-total">Total 00:00</span>
+        </div>
+        <div class="sim-table-wrap">
+          <table class="sim-table">
+            <thead>
+              <tr><th>#</th><th>Acció</th><th>Línia</th><th>Durada</th><th>Estimació</th><th></th></tr>
+            </thead>
+            <tbody id="sim-rows"></tbody>
+          </table>
+          <p id="sim-empty" class="sim-hint">Encara no hi ha cap acció. Afegeix-ne una per començar.</p>
+        </div>
+        <button id="sim-add" type="button" class="lines-panel__recalc">
+          <svg class="icon" aria-hidden="true"><use href="#i-add" /></svg>
+          Afegeix una acció
+        </button>
+      </section>
+
+      <!-- Acció actual -->
+      <section class="sim-col" aria-labelledby="sim-now-title">
+        <h3 id="sim-now-title" class="lines-panel__subtitle">Acció actual</h3>
+        <dl id="sim-now" class="sim-facts"></dl>
+      </section>
+
+      <!-- Estat numèric del sistema -->
+      <section class="sim-col" aria-labelledby="sim-state-title">
+        <h3 id="sim-state-title" class="lines-panel__subtitle">Estat del sistema</h3>
+        <div id="sim-state" class="sim-state"></div>
+      </section>
+    </div>
+  </section>
 
   <!-- Panell de línies de transport: sobreposat al canvas (mateix patró que
        el menú contextual i els marcs de selecció, que també són HTML fix per

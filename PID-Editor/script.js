@@ -2840,6 +2840,10 @@ function restoreState(state) {
   // alt que hi ha al canvas: si ho fes, un element nou en reutilitzaria un
   // i les canonades es confondrien en desar i tornar a obrir.
   elementCount = Math.max(Number(state.elementCount) || 0, maxIdNumber);
+
+  // Desfer, refer i obrir un arxiu poden haver canviat el diagrama sencer i
+  // la seqüència: la simulació s'ha de refer amb el que hi ha ara.
+  refreshSimulationIfOpen();
 }
 
 function updateHistoryButtons() {
@@ -2858,6 +2862,10 @@ function pushHistory() {
   if (history.length > MAX_HISTORY) history.shift();
   historyIndex = history.length - 1;
   updateHistoryButtons();
+  // Qualsevol acció de l'usuari pot haver canviat el diagrama, la
+  // configuració d'una línia o la seqüència. Si el panell de simulació és
+  // obert, es torna a compilar (vegeu refreshSimulation).
+  refreshSimulationIfOpen();
 }
 
 function undo() {
@@ -3174,6 +3182,695 @@ window.addEventListener('dragover', (event) => {
 window.addEventListener('drop', (event) => {
   if (hasFiles(event) && !canvasContainer.contains(event.target)) event.preventDefault();
 });
+
+// ---- Interfície de simulació ----
+// Dona pantalla al motor de càlcul (simulation.js). AQUÍ NO S'HI CALCULA
+// RES: el bucle de reproducció només fa avançar un rellotge i, a cada pas,
+// li demana l'estat al motor. Si algun dia us trobeu multiplicant quilos en
+// aquest fitxer, heu agafat el camí equivocat.
+//
+// Peces: el pont que construeix l'escenari a partir del diagrama, el bucle
+// de reproducció, l'editor de seqüència, el cronograma amb el cursor, i les
+// dues llistes de només lectura (acció actual i estat del sistema).
+// Vegeu docs/SIMULATION.md.
+
+const simPanel = document.getElementById('sim-panel');
+const simToggle = document.getElementById('time-calc');
+const simCloseButton = document.getElementById('sim-close');
+const simPlayButton = document.getElementById('sim-play');
+const simPauseButton = document.getElementById('sim-pause');
+const simStopButton = document.getElementById('sim-stop');
+const simSpeedSelect = document.getElementById('sim-speed');
+const simClock = document.getElementById('sim-clock');
+const simIssues = document.getElementById('sim-issues');
+const simTicks = document.getElementById('sim-ticks');
+const simTrack = document.getElementById('sim-track');
+const simBlocksHost = document.getElementById('sim-blocks');
+const simCursor = document.getElementById('sim-cursor');
+const simRows = document.getElementById('sim-rows');
+const simEmpty = document.getElementById('sim-empty');
+const simTotal = document.getElementById('sim-total');
+const simAddButton = document.getElementById('sim-add');
+const simFactsList = document.getElementById('sim-now');
+const simStateHost = document.getElementById('sim-state');
+
+// Referència de velocitat: 1 segon real = 1 minut de simulació a 1x. La
+// velocitat NOMÉS multiplica això; els números d'un instant donat no en
+// depenen mai.
+const SIM_SECONDS_PER_REAL_SECOND = 60;
+const SIM_STEP = 5;   // salt de les fletxes del teclat, en segons
+
+// L'escenari i la compilació vigents. Es refan quan canvia alguna cosa que
+// hi influeix (vegeu refreshSimulation), mai a cada imatge ni a cada
+// moviment del cursor: moure el cursor només consulta el que ja hi ha.
+let simScenario = null;
+let simCompiled = null;
+
+let simTime = 0;
+let simPlaying = false;
+let simFrameId = 0;
+let simLastFrame = 0;
+let simScrubbing = false;
+let simResumeAfterScrub = false;
+
+// Nodes de text que s'actualitzen a cada imatge. Es guarden en construir
+// les llistes i després només se'ls canvia el contingut: així el bucle no
+// reconstrueix DOM seixanta cops per segon ni fa saltar cap barra de
+// desplaçament.
+let simFactNodes = {};
+let simValueNodes = { storages: {}, consumptions: {} };
+
+// ---- Format ----
+function formatClock(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  const minutes = Math.floor(total / 60);
+  return `${String(minutes).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function actionLabel(type) {
+  return ProcessModel.ACTION_LABELS[type] || type;
+}
+
+function simLineName(lineId) {
+  const line = simScenario && simScenario.lines[lineId];
+  return line ? line.name : lineId;
+}
+
+// ---- El pont entre el diagrama i el motor ----
+// Converteix el que hi ha al canvas i al model de procés en l'escenari pla
+// que espera SimulationEngine. És l'ÚNIC lloc que sap com es diu cada cosa
+// a les dues bandes; el motor no sap res del diagrama i el diagrama no sap
+// res del motor.
+function buildSimulationScenario() {
+  const scenario = {
+    storages: {},
+    consumptions: {},
+    lines: {},
+    actions: ProcessModel.getSequence(),
+  };
+
+  elementsWithRole(ROLE_STORAGE).forEach((element) => {
+    const id = element.dataset.id;
+    scenario.storages[id] = {
+      ...ProcessModel.getElement(id, ROLE_STORAGE),
+      name: elementDisplayName(element),
+    };
+  });
+
+  elementsWithRole(ROLE_CONSUMPTION).forEach((element) => {
+    const id = element.dataset.id;
+    scenario.consumptions[id] = {
+      ...ProcessModel.getElement(id, ROLE_CONSUMPTION),
+      name: elementDisplayName(element),
+    };
+  });
+
+  const graph = buildProcessGraph();
+
+  findTransportLines().lines.forEach((line) => {
+    const signature = ProcessModel.lineSignature(line);
+    const config = ProcessModel.getLine(signature);
+    const source = ProcessModel.resolvePickupSource(graph, line.pickupPointId, canCrossElement);
+
+    scenario.lines[signature] = {
+      // Sense nom propi, el parell de rols identifica la línia i no canvia
+      // a cada recàlcul, cosa que el número de línia sí que faria.
+      name: config.name
+        || `${ROLE_PREFIX[ROLE_PICKUP]}${line.pickupNumber} → ${ROLE_PREFIX[ROLE_CONSUMPTION]}${line.consumptionNumber}`,
+      throughput: config.throughput,
+      diameter: config.diameter,
+      length: config.length,
+      configured: ProcessModel.hasLine(signature),
+      pickupId: line.pickupPointId,
+      pickupName: processElementName(line.pickupPointId),
+      consumptionId: line.consumptionPointId,
+      storageId: source.storageId,
+      storageStatus: source.status,
+    };
+  });
+
+  return scenario;
+}
+
+// Per què una línia no es pot fer servir. Es pregunta AL MOTOR, validant
+// una seqüència d'una sola acció de transport amb aquesta línia: així el
+// motiu és exactament el mateix que veuria l'usuari en prémer Play i aquest
+// fitxer no ha de repetir cap regla.
+function simLineProblems(lineId) {
+  if (!simScenario || !lineId || !simScenario.lines[lineId]) return [];
+  const probe = { ...simScenario, actions: [{ order: 1, type: 'transport', lineId, duration: 60 }] };
+  return SimulationEngine.validate(probe).errors.filter((issue) => issue.lineId === lineId);
+}
+
+// ---- Compilació ----
+// Es refà en obrir el panell, en prémer Play i cada cop que canvia alguna
+// cosa que hi influeix (la seqüència, el diagrama o la configuració de les
+// línies, que passen totes per l'historial).
+function refreshSimulation() {
+  simScenario = buildSimulationScenario();
+  simCompiled = SimulationEngine.compile(simScenario);
+
+  if (!simCompiled.ok) pauseSimulation();
+  simTime = Math.min(simTime, simCompiled.totalDuration);
+
+  renderSimIssues();
+  renderSimSequence();
+  renderSimTimeline();
+  buildSimStateShell();
+  renderSimNow();
+  updateSimControls();
+}
+
+function refreshSimulationIfOpen() {
+  if (simPanel && !simPanel.hidden) refreshSimulation();
+}
+
+// ---- Reproducció ----
+// El bucle fa servir el temps real transcorregut entre imatges, no un
+// comptatge d'imatges: així el resultat no depèn de la potència de
+// l'ordinador ni de si el navegador va just.
+function setSimTime(seconds) {
+  simTime = Math.min(Math.max(Number(seconds) || 0, 0), simCompiled ? simCompiled.totalDuration : 0);
+  renderSimNow();
+}
+
+function simTick(now) {
+  if (!simPlaying) return;
+
+  const realSeconds = (now - simLastFrame) / 1000;
+  simLastFrame = now;
+  setSimTime(simTime + realSeconds * SIM_SECONDS_PER_REAL_SECOND * Number(simSpeedSelect.value));
+
+  if (simTime >= simCompiled.totalDuration) {
+    pauseSimulation();
+    return;
+  }
+  simFrameId = requestAnimationFrame(simTick);
+}
+
+function startPlaybackLoop() {
+  if (!simCompiled || !simCompiled.ok || !simCompiled.totalDuration) return;
+  simPlaying = true;
+  simLastFrame = performance.now();
+  simFrameId = requestAnimationFrame(simTick);
+  updateSimControls();
+}
+
+function playSimulation() {
+  // Es compila en prémer Play: el que es reprodueix és sempre el diagrama
+  // i la seqüència d'ara, no els d'abans.
+  refreshSimulation();
+  if (!simCompiled.ok) return;   // els errors bloquegen la reproducció
+
+  if (simTime >= simCompiled.totalDuration) setSimTime(0);
+  startPlaybackLoop();
+}
+
+function pauseSimulation() {
+  simPlaying = false;
+  cancelAnimationFrame(simFrameId);
+  updateSimControls();
+}
+
+// Torna a la situació inicial. No toca res del projecte: només posa el
+// rellotge a zero i torna a demanar l'estat al motor.
+function stopSimulation() {
+  pauseSimulation();
+  setSimTime(0);
+  updateSimControls();
+}
+
+function updateSimControls() {
+  const ready = Boolean(simCompiled && simCompiled.ok && simCompiled.totalDuration);
+  simPlayButton.disabled = !ready || simPlaying;
+  simPauseButton.disabled = !simPlaying;
+  simStopButton.disabled = !ready || (!simPlaying && simTime === 0);
+}
+
+// ---- Errors i avisos ----
+function renderSimIssues() {
+  const errors = simCompiled ? simCompiled.errors : [];
+  const warnings = simCompiled ? simCompiled.warnings : [];
+
+  simIssues.replaceChildren();
+  simIssues.classList.toggle('sim-issues--error', errors.length > 0);
+  simIssues.classList.toggle('sim-issues--warn', errors.length === 0 && warnings.length > 0);
+  simIssues.hidden = !errors.length && !warnings.length;
+  if (simIssues.hidden) return;
+
+  const list = errors.length ? errors : warnings;
+  const heading = document.createElement('p');
+  heading.className = 'sim-issues__heading';
+  heading.textContent = errors.length
+    ? (errors.length === 1 ? 'No es pot simular:' : `No es pot simular (${errors.length} problemes):`)
+    : (warnings.length === 1 ? 'Avís:' : `Avisos (${warnings.length}):`);
+  simIssues.appendChild(heading);
+
+  list.forEach((issue) => {
+    const line = document.createElement('p');
+    line.textContent = issue.message;
+    simIssues.appendChild(line);
+  });
+}
+
+// ---- Editor de seqüència ----
+function commitSequence(actions) {
+  ProcessModel.setSequence(actions);
+  // Entra a l'historial com qualsevol altra acció de l'usuari; pushHistory
+  // torna a compilar la simulació si el panell és obert.
+  pushHistory();
+}
+
+function simSelect(value, options, onChange) {
+  const select = document.createElement('select');
+  select.className = 'process-field__input';
+
+  options.forEach((option) => {
+    const node = document.createElement('option');
+    node.value = option.value;
+    node.textContent = option.label;
+    if (option.disabled) node.disabled = true;
+    if (option.title) node.title = option.title;
+    select.appendChild(node);
+  });
+
+  select.value = value;
+  select.addEventListener('change', () => onChange(select.value));
+  return select;
+}
+
+function simIconButton(iconId, label, disabled, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'sim-icon-btn';
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  button.disabled = disabled;
+  button.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#${iconId}" /></svg>`;
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function renderSimSequence() {
+  const actions = ProcessModel.getSequence();
+  const transport = ProcessModel.ACTION_TYPES.TRANSPORT;
+
+  simRows.replaceChildren();
+  simEmpty.hidden = actions.length > 0;
+  simTotal.textContent = `Total ${formatClock(actions.reduce((sum, a) => sum + a.duration, 0))}`;
+
+  const typeOptions = Object.values(ProcessModel.ACTION_TYPES)
+    .map((type) => ({ value: type, label: actionLabel(type) }));
+
+  actions.forEach((action, index) => {
+    const row = document.createElement('tr');
+
+    const order = document.createElement('td');
+    order.className = 'sim-row__order';
+    order.textContent = String(action.order);
+
+    const type = document.createElement('td');
+    type.appendChild(simSelect(action.type, typeOptions, (value) => {
+      const next = ProcessModel.getSequence();
+      next[index].type = value;
+      commitSequence(next);
+    }));
+
+    // Línia: només per a les accions que mouen producte. Les línies que no
+    // es poden fer servir surten desactivades, amb el motiu al tooltip i,
+    // si són la que hi ha triada, també escrit a la columna del costat.
+    const lineCell = document.createElement('td');
+    if (action.type === transport) {
+      const options = [{ value: '', label: '— Tria una línia —' }];
+      Object.keys(simScenario ? simScenario.lines : {}).forEach((id) => {
+        const problems = simLineProblems(id);
+        options.push({
+          value: id,
+          label: problems.length ? `${simLineName(id)} (no disponible)` : simLineName(id),
+          // La que ja està triada no es desactiva mai: si no, no es podria
+          // ni veure ni canviar.
+          disabled: problems.length > 0 && id !== action.lineId,
+          title: problems.length ? problems[0].message : '',
+        });
+      });
+      lineCell.appendChild(simSelect(action.lineId, options, (value) => {
+        const next = ProcessModel.getSequence();
+        next[index].lineId = value;
+        commitSequence(next);
+      }));
+    } else {
+      lineCell.textContent = '—';
+      lineCell.className = 'sim-row__unit';
+    }
+
+    // Durada: s'escriu en minuts i es desa en segons.
+    const durationCell = document.createElement('td');
+    const duration = document.createElement('div');
+    duration.className = 'sim-row__duration';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.inputMode = 'decimal';
+    input.className = 'process-field__input';
+    input.value = String(action.duration / 60);
+    input.addEventListener('change', () => {
+      const minutes = ProcessModel.parseNumber(input.value);
+      const next = ProcessModel.getSequence();
+      next[index].duration = minutes === null ? 0 : minutes * 60;
+      commitSequence(next);
+    });
+    const unit = document.createElement('span');
+    unit.className = 'sim-row__unit';
+    unit.textContent = 'min';
+    duration.append(input, unit);
+    durationCell.appendChild(duration);
+
+    // Estimació: el que diu el motor per a aquesta acció, no un càlcul fet
+    // aquí. Si la línia té algun problema, hi va el motiu.
+    const estimate = document.createElement('td');
+    estimate.className = 'sim-row__estimate';
+    if (action.type !== transport) {
+      estimate.textContent = '—';
+    } else {
+      const problems = simLineProblems(action.lineId);
+      if (!action.lineId) {
+        estimate.classList.add('sim-row__estimate--short');
+        estimate.textContent = 'Cap línia triada';
+      } else if (problems.length) {
+        estimate.classList.add('sim-row__estimate--short');
+        estimate.textContent = problems[0].message;
+        estimate.title = problems[0].message;
+      } else {
+        const line = simScenario.lines[action.lineId];
+        const storage = simScenario.storages[line.storageId];
+        const result = simCompiled.ok ? simCompiled.actions[index] : null;
+        const parts = [storage && storage.product ? storage.product : 'sense producte', `${line.throughput} kg/h`];
+        if (result) {
+          parts.push(`${ProcessModel.formatKg(result.transferred)} kg`);
+          if (!result.complete) estimate.classList.add('sim-row__estimate--short');
+        }
+        estimate.textContent = parts.join(' · ');
+        if (result && !result.complete) {
+          estimate.title = 'El magatzem es buida abans que s\'acabi aquesta acció.';
+        }
+      }
+    }
+
+    const buttons = document.createElement('td');
+    buttons.className = 'sim-row__actions';
+    buttons.append(
+      simIconButton('i-up', 'Puja', index === 0, () => {
+        const next = ProcessModel.getSequence();
+        [next[index - 1], next[index]] = [next[index], next[index - 1]];
+        commitSequence(next);
+      }),
+      simIconButton('i-down', 'Baixa', index === actions.length - 1, () => {
+        const next = ProcessModel.getSequence();
+        [next[index], next[index + 1]] = [next[index + 1], next[index]];
+        commitSequence(next);
+      }),
+      simIconButton('i-trash', 'Elimina', false, () => {
+        const next = ProcessModel.getSequence();
+        next.splice(index, 1);
+        commitSequence(next);
+      }),
+    );
+    buttons.querySelector('.sim-icon-btn:last-child').classList.add('sim-icon-btn--danger');
+
+    row.append(order, type, lineCell, durationCell, estimate, buttons);
+    simRows.appendChild(row);
+  });
+}
+
+// ---- Cronograma ----
+function renderSimTimeline() {
+  simBlocksHost.replaceChildren();
+  simTicks.replaceChildren();
+
+  const total = simCompiled && simCompiled.ok ? simCompiled.totalDuration : 0;
+  simTrack.setAttribute('aria-valuemax', String(Math.round(total)));
+  if (!total) {
+    simCursor.style.left = '0%';
+    return;
+  }
+
+  simCompiled.actions.forEach((action) => {
+    const block = document.createElement('div');
+    block.className = 'sim-block';
+    if (!action.moving) block.classList.add('sim-block--idle');
+    else if (!action.complete) block.classList.add('sim-block--short');
+    block.style.left = `${(action.startTime / total) * 100}%`;
+    block.style.width = `${(action.duration / total) * 100}%`;
+
+    const name = document.createElement('span');
+    name.className = 'sim-block__name';
+    name.textContent = actionLabel(action.type);
+
+    const line = document.createElement('span');
+    line.className = 'sim-block__line';
+    line.textContent = action.lineId ? simLineName(action.lineId) : '—';
+
+    block.append(name, line);
+    simBlocksHost.appendChild(block);
+  });
+
+  // Marques de temps a les fronteres de les accions, saltant-se les que
+  // caurien massa a prop de l'anterior perquè no s'encavalquin.
+  let last = -Infinity;
+  [0, ...simCompiled.actions.map((action) => action.endTime)].forEach((seconds) => {
+    const ratio = seconds / total;
+    if (ratio - last < 0.07 && seconds !== total) return;
+    last = ratio;
+
+    const tick = document.createElement('span');
+    tick.className = 'sim-timeline__tick';
+    tick.style.left = `${ratio * 100}%`;
+    tick.textContent = `${Math.round(seconds / 60)} min`;
+    simTicks.appendChild(tick);
+  });
+}
+
+// ---- Acció actual i estat del sistema ----
+// L'estructura es construeix un sol cop (aquí) i el bucle només canvia els
+// textos, de manera que reproduir no reconstrueix DOM contínuament.
+const SIM_FACTS = [
+  ['action', 'Acció'],
+  ['line', 'Línia'],
+  ['time', 'Temps'],
+  ['status', 'Estat'],
+  ['product', 'Producte'],
+  ['throughput', 'Rendiment'],
+  ['moved', 'Transferits'],
+];
+
+function buildSimFactsShell() {
+  simFactsList.replaceChildren();
+  simFactNodes = {};
+
+  SIM_FACTS.forEach(([key, label]) => {
+    const term = document.createElement('dt');
+    term.textContent = label;
+    const value = document.createElement('dd');
+    value.textContent = '—';
+    simFactNodes[key] = value;
+    simFactsList.append(term, value);
+  });
+}
+
+function buildSimStateShell() {
+  simStateHost.replaceChildren();
+  simValueNodes = { storages: {}, consumptions: {} };
+
+  const groups = [
+    ['storages', 'Elements d\'emmagatzematge'],
+    ['consumptions', 'Punts de consum'],
+  ];
+
+  groups.forEach(([bucket, label]) => {
+    const entries = Object.keys(simScenario ? simScenario[bucket] : {}).sort();
+    const heading = document.createElement('p');
+    heading.className = 'sim-state__group';
+    heading.textContent = label;
+    simStateHost.appendChild(heading);
+
+    if (!entries.length) {
+      const empty = document.createElement('p');
+      empty.className = 'sim-hint';
+      empty.textContent = 'Cap de definit al diagrama.';
+      simStateHost.appendChild(empty);
+      return;
+    }
+
+    entries.forEach((id) => {
+      const row = document.createElement('div');
+      row.className = 'sim-state__row';
+
+      const name = document.createElement('span');
+      name.className = 'sim-state__name';
+      name.textContent = simScenario[bucket][id].name || id;
+
+      const value = document.createElement('span');
+      value.className = 'sim-state__value';
+      value.textContent = '—';
+
+      simValueNodes[bucket][id] = value;
+      row.append(name, value);
+      simStateHost.appendChild(row);
+    });
+  });
+}
+
+// L'única funció que es crida a cada imatge. Demana l'estat al motor i
+// escriu els textos; no calcula res.
+function renderSimNow() {
+  const total = simCompiled ? simCompiled.totalDuration : 0;
+  simClock.textContent = `${formatClock(simTime)} / ${formatClock(total)}`;
+  simCursor.style.left = total ? `${(simTime / total) * 100}%` : '0%';
+  simTrack.setAttribute('aria-valuenow', String(Math.round(simTime)));
+  simTrack.setAttribute('aria-valuetext', `${formatClock(simTime)} de ${formatClock(total)}`);
+
+  if (!simCompiled || !simCompiled.ok) {
+    Object.values(simFactNodes).forEach((node) => { node.textContent = '—'; });
+    Object.values(simValueNodes).forEach((bucket) => {
+      Object.values(bucket).forEach((node) => { node.textContent = '—'; });
+    });
+    return;
+  }
+
+  const state = SimulationEngine.stateAt(simCompiled, simTime);
+  const action = state.action;
+  const line = action && action.lineId ? simScenario.lines[action.lineId] : null;
+  const storage = line ? simScenario.storages[line.storageId] : null;
+
+  simFactNodes.action.textContent = action ? `${action.order}. ${actionLabel(action.type)}` : '—';
+  simFactNodes.line.textContent = line ? line.name : '—';
+  simFactNodes.time.textContent = action
+    ? `${formatClock(simTime - action.startTime)} / ${formatClock(action.duration)}`
+    : '—';
+
+  let status = 'Aturada';
+  if (state.finished) status = 'Acabada';
+  else if (simPlaying) status = 'En marxa';
+  else if (simTime > 0) status = 'En pausa';
+  if (action && !action.complete) status += ' · incompleta';
+  simFactNodes.status.textContent = status;
+  simFactNodes.status.classList.toggle('is-short', Boolean(action && !action.complete));
+
+  simFactNodes.product.textContent = storage && storage.product ? storage.product : '—';
+  simFactNodes.throughput.textContent = line ? `${line.throughput} kg/h` : '—';
+  simFactNodes.moved.textContent = action && action.lineId
+    ? `${ProcessModel.formatKg(state.lines[action.lineId])} kg`
+    : '—';
+
+  Object.keys(simValueNodes.storages).forEach((id) => {
+    simValueNodes.storages[id].textContent = `${ProcessModel.formatKg(state.storages[id])} kg`;
+  });
+
+  Object.keys(simValueNodes.consumptions).forEach((id) => {
+    const node = simValueNodes.consumptions[id];
+    const capacity = Number(simScenario.consumptions[id].capacity) || 0;
+    node.textContent = `${ProcessModel.formatKg(state.consumptions[id])} kg`;
+    node.classList.toggle('is-over', capacity > 0 && state.consumptions[id] > capacity);
+  });
+
+  // Fila de la seqüència que s'està reproduint.
+  [...simRows.children].forEach((row, index) => {
+    row.classList.toggle('is-current', Boolean(action) && index === action.order - 1);
+  });
+}
+
+// ---- Cursor arrossegable ----
+// Arrossegar només consulta la compilació que ja hi ha: no en refà cap.
+function simTimeFromPointer(clientX) {
+  const rect = simTrack.getBoundingClientRect();
+  const ratio = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
+  return ratio * (simCompiled ? simCompiled.totalDuration : 0);
+}
+
+simTrack.addEventListener('pointerdown', (event) => {
+  if (!simCompiled || !simCompiled.ok || !simCompiled.totalDuration) return;
+  event.preventDefault();
+  simTrack.setPointerCapture(event.pointerId);
+  simScrubbing = true;
+  // Mentre s'arrossega, el rellotge no avança: així el bucle i el dit no
+  // es barallen. Si estava reproduint, continua en deixar-lo anar.
+  simResumeAfterScrub = simPlaying;
+  if (simPlaying) pauseSimulation();
+  setSimTime(simTimeFromPointer(event.clientX));
+});
+
+simTrack.addEventListener('pointermove', (event) => {
+  if (simScrubbing) setSimTime(simTimeFromPointer(event.clientX));
+});
+
+['pointerup', 'pointercancel'].forEach((type) => {
+  simTrack.addEventListener(type, (event) => {
+    if (!simScrubbing) return;
+    simScrubbing = false;
+    if (simTrack.hasPointerCapture(event.pointerId)) simTrack.releasePointerCapture(event.pointerId);
+    if (simResumeAfterScrub && simTime < simCompiled.totalDuration) startPlaybackLoop();
+    simResumeAfterScrub = false;
+    updateSimControls();
+  });
+});
+
+// Avançar i retrocedir amb el teclat, per a qui no fa servir el ratolí.
+simTrack.addEventListener('keydown', (event) => {
+  if (!simCompiled || !simCompiled.ok) return;
+  const jumps = {
+    ArrowLeft: -SIM_STEP,
+    ArrowRight: SIM_STEP,
+    PageDown: -SIM_STEP * 12,
+    PageUp: SIM_STEP * 12,
+  };
+
+  if (event.key === 'Home') setSimTime(0);
+  else if (event.key === 'End') setSimTime(simCompiled.totalDuration);
+  else if (jumps[event.key] !== undefined) setSimTime(simTime + jumps[event.key]);
+  else return;
+
+  event.preventDefault();
+  updateSimControls();
+});
+
+// ---- Obrir i tancar ----
+function openSimPanel() {
+  simPanel.hidden = false;
+  simToggle.setAttribute('aria-expanded', 'true');
+  refreshSimulation();
+  renderSimNow();
+}
+
+function closeSimPanel() {
+  pauseSimulation();
+  simPanel.hidden = true;
+  simToggle.setAttribute('aria-expanded', 'false');
+}
+
+simToggle.addEventListener('click', () => {
+  if (simPanel.hidden) openSimPanel();
+  else closeSimPanel();
+});
+
+simCloseButton.addEventListener('click', closeSimPanel);
+simPlayButton.addEventListener('click', playSimulation);
+simPauseButton.addEventListener('click', pauseSimulation);
+simStopButton.addEventListener('click', stopSimulation);
+
+// Canviar de velocitat no altera el resultat: només la rapidesa amb què
+// avança el rellotge. El temps actual no es toca.
+simSpeedSelect.addEventListener('change', () => {
+  simLastFrame = performance.now();
+});
+
+simAddButton.addEventListener('click', () => {
+  const lines = Object.keys(simScenario ? simScenario.lines : {});
+  const usable = lines.find((id) => !simLineProblems(id).length) || lines[0] || '';
+  const actions = ProcessModel.getSequence();
+  actions.push({ type: ProcessModel.ACTION_TYPES.TRANSPORT, lineId: usable, duration: 300 });
+  commitSequence(actions);
+});
+
+buildSimFactsShell();
 
 // Captura inicial (canvas buit), perquè hi hagi alguna cosa a la qual
 // tornar amb "Desfer" just després de la primera acció.

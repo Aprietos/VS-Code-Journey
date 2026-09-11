@@ -4,18 +4,19 @@ Document de referència per a qui continuï el projecte sense haver vist com
 es va fer. Descriu **què hi ha ara mateix** a la capa de dades de procés de
 l'Editor P&ID, on viu cada cosa i quines regles no s'han de trencar.
 
-Escrit en acabar l'**etapa 2**:
+Escrit en acabar l'**etapa 3**:
 
 - **Etapa 1** — capa de dades de procés: rols d'element, producte,
   quantitats, capacitats, configuració de les línies de transport i
-  detecció de l'element d'emmagatzematge aigües amunt (§1–§9).
-- **Etapa 2** — **motor de càlcul de la simulació**: seqüència d'accions,
-  compilació en trams, consulta d'estat en qualsevol instant i validació
-  prèvia (§6, §7).
+  detecció de l'element d'emmagatzematge aigües amunt.
+- **Etapa 2** — **motor de càlcul**: seqüència d'accions, compilació en
+  trams, consulta d'estat en qualsevol instant i validació prèvia (§6, §7).
+- **Etapa 3** — **interfície de simulació**: editor de seqüència, controls
+  de reproducció, cronograma amb cursor arrossegable i estat numèric (§8).
 
-L'etapa 2 **no ha canviat res de la pantalla**: no hi ha cap botó ni cap
-panell nou. El motor existeix, es pot executar i està provat, però encara no
-el crida ningú des de la interfície. Vegeu [Què NO hi ha](#què-no-hi-ha).
+Els números encara es veuen **en llistes**, no sobre el diagrama: les barres
+de nivell, el ressaltat de la línia activa i les animacions són de l'etapa
+següent. Vegeu [Què NO hi ha](#què-no-hi-ha).
 
 ---
 
@@ -30,7 +31,7 @@ aquest ordre, que **importa**.
 | `index.html` | Marcatge. Barra d'eines, `<svg id="canvas">`, panell de línies de transport i panell de configuració de procés. |
 | `process.js` | **Capa de dades de procés.** No toca el DOM. Defineix l'esquema de les fitxes, el model de seqüència, el magatzem, la signatura de línia, la detecció aigües amunt, la validació i la serialització. |
 | `simulation.js` | **Motor de càlcul de la simulació.** No toca el DOM ni modifica res. Rep un escenari i retorna resultats (§6). |
-| `script.js` | Tota la resta: dibuix dels elements, canonades, selecció, zoom/pan, rols, detecció de línies de transport, panells, desfer/refer i arxius. |
+| `script.js` | Tota la resta: dibuix dels elements, canonades, selecció, zoom/pan, rols, detecció de línies de transport, panells, **interfície de simulació** (§8), desfer/refer i arxius. |
 | `styles.css` | Estils. |
 | `tests/` | Proves automàtiques del motor (§7). |
 | `Exemples/` | Models `.pid.json` de mostra. |
@@ -137,10 +138,10 @@ el motor (§6).
 | `lineId` | La línia de transport (la seva **signatura**, §4). Obligatòria a les accions de transport. |
 | `duration` | **En segons**, sempre més gran que 0. A la pantalla es veurà en minuts; el model no arrodoneix mai. |
 
-**La seqüència encara NO es desa a l'arxiu del projecte.** `serialize()` la
-deixa fora expressament i `load()` i `clear()` la buiden. Desar-la és feina
-de l'etapa següent: s'hi afegeix a `serialize()` i a `load()` de
-`process.js`, i prou.
+La seqüència **es desa amb el model**, a `state.process.sequence`.
+`load()` la passa per `normalizeSequence()`, de manera que un arxiu tocat a
+mà no la pot deixar en un estat estrany. `clear()` (i, per tant, «Neteja
+tot») la buida.
 
 ### 3.3 Unitats i números
 
@@ -339,8 +340,8 @@ Un objecte pla. El motor no en modifica mai res.
 }
 ```
 
-**Qui construeix aquest escenari a partir del diagrama de debò encara no
-existeix**: és feina de l'etapa següent. Tota la informació hi és, però:
+El construeix **`buildSimulationScenario()`** a `script.js` (§8.1). La
+correspondència entre l'escenari i el projecte és aquesta:
 
 | Camp de l'escenari | D'on surt |
 | --- | --- |
@@ -502,7 +503,121 @@ Les comprovacions són d'**igualtat exacta** per defecte (`assert.equal`).
 resultat exacte, i amb un marge ridículament petit. Si algun dia cal
 afluixar-lo, hi ha un problema de debò.
 
-## 8. Format de guardat
+## 8. La interfície de simulació (`script.js`)
+
+Dona pantalla al motor. **Aquí no s'hi calcula res**: el bucle de
+reproducció només fa avançar un rellotge i, a cada pas, li demana l'estat al
+motor. Si algú es troba multiplicant quilos dins d'aquest codi, ha agafat el
+camí equivocat.
+
+Tot viu en una sola secció de `script.js`, marcada
+`// ---- Interfície de simulació ----`, al final del fitxer.
+
+### 8.1 El pont: `buildSimulationScenario()`
+
+Converteix el diagrama i el model de procés en l'escenari pla de §6.1. És
+l'**únic** lloc que sap com es diu cada cosa a les dues bandes: el motor no
+sap res del diagrama i el diagrama no sap res del motor.
+
+Es crida des de `refreshSimulation()` i enlloc més.
+
+### 8.2 Quan es compila
+
+`refreshSimulation()` refà l'escenari i la compilació. Es crida:
+
+- en obrir el panell,
+- en prémer **Play** (el que es reprodueix és sempre el diagrama i la
+  seqüència d'ara),
+- des de `refreshSimulationIfOpen()`, que va enganxat al final de
+  `pushHistory()` i de `restoreState()`. Així qualsevol cosa que canviï el
+  projecte —moure un element, configurar una línia, editar la seqüència,
+  desfer, refer o obrir un arxiu— refà la simulació si el panell és obert.
+
+**Mai** es compila a cada imatge ni en moure el cursor: arrossegar només
+consulta la compilació que ja hi ha.
+
+### 8.3 El bucle de reproducció
+
+```js
+let simTime = 0;        // segons de simulació
+let simPlaying = false;
+const SIM_SECONDS_PER_REAL_SECOND = 60;   // 1 s real = 1 min simulat a 1x
+```
+
+`simTick(now)` fa servir el **temps real transcorregut** entre imatges
+(`now - simLastFrame`), no un comptatge d'imatges: així el resultat no depèn
+de la potència de l'ordinador ni de si el navegador va just.
+
+```js
+simTime += (now - simLastFrame) / 1000 * SIM_SECONDS_PER_REAL_SECOND * velocitat;
+```
+
+La velocitat **només** multiplica aquesta línia. Els números d'un instant
+donat no en depenen mai, perquè els dona `stateAt()`, que és una funció pura
+de (compilació, instant).
+
+Funcions: `playSimulation()` (compila i arrenca), `startPlaybackLoop()`
+(arrenca sense compilar, per reprendre després d'arrossegar),
+`pauseSimulation()`, `stopSimulation()` (pausa i torna a zero).
+
+### 8.4 On viu l'estat de reproducció
+
+En variables de mòdul de `script.js`, **fora** del model de procés i fora
+del motor: `simScenario`, `simCompiled`, `simTime`, `simPlaying`,
+`simFrameId`, `simLastFrame`, `simScrubbing`, `simResumeAfterScrub`.
+
+Res d'això es desa ni toca el projecte. **Stop** el descarta tornant a zero;
+el model de procés no s'ha tocat en cap moment.
+
+### 8.5 El cursor arrossegable
+
+La pista sencera (`#sim-track`) és la zona clicable. Amb `pointerdown` es
+captura el punter, amb `pointermove` es va posant el temps i amb `pointerup`
+es deixa anar.
+
+Mentre s'arrossega, **el rellotge no avança**: si estava reproduint es posa
+en pausa i es guarda a `simResumeAfterScrub` per reprendre en deixar-lo. Així
+el bucle i el dit no es barallen.
+
+També respon al teclat: fletxes (±5 s), Re Pàg/Av Pàg (±1 min), Inici i Fi.
+
+### 8.6 Què es repinta i quan
+
+| Funció | Quan | Què fa |
+| --- | --- | --- |
+| `renderSimIssues()` | a cada compilació | errors (bloquegen) i avisos (no bloquegen) |
+| `renderSimSequence()` | a cada compilació | la taula de la seqüència |
+| `renderSimTimeline()` | a cada compilació | blocs i marques del cronograma |
+| `buildSimStateShell()` | a cada compilació | les files de l'estat del sistema, buides |
+| `renderSimNow()` | **a cada imatge** | rellotge, cursor, acció actual i valors |
+
+`renderSimNow()` és l'única que s'executa seixanta cops per segon, i només
+canvia **textos** de nodes que ja existeixen (`simFactNodes`,
+`simValueNodes`). No reconstrueix DOM: si ho fes, faria saltar les barres de
+desplaçament i aniria a batzegades.
+
+### 8.7 L'editor de seqüència
+
+Les files surten de `ProcessModel.getSequence()`. Qualsevol canvi passa per
+`commitSequence(actions)`, que desa al model i crida `pushHistory()`: la
+seqüència entra a l'historial com qualsevol altra acció, o sigui que
+**editar-la es pot desfer**.
+
+Per què una línia no es pot fer servir ho diu `simLineProblems(lineId)`, que
+**ho pregunta al motor** validant una seqüència d'una sola acció de
+transport amb aquella línia. Així el motiu és exactament el mateix que veurà
+l'usuari en prémer Play, i la interfície no repeteix cap regla del motor.
+
+Les línies amb problemes surten desactivades al desplegable amb el motiu al
+tooltip, i el motiu també s'escriu a la columna «Estimació».
+
+### 8.8 Durades i format
+
+L'usuari escriu **minuts**; es desa en **segons** (`minuts * 60`). El temps
+es mostra `mm:ss` amb `formatClock()`, i els quilos amb un decimal via
+`ProcessModel.formatKg()`.
+
+## 9. Format de guardat
 
 Un arxiu `.pid.json` és:
 
@@ -516,7 +631,11 @@ Un arxiu `.pid.json` és:
     "elements": [ { "x": 0, "y": 0, "data": { "id": "silo-1", "type": "silo", ... } } ],
     "pipes":    [ { "fromId": "...", "fromRole": "...", ... } ],
     "elementCount": 12,
-    "process": { "elements": { ... }, "lines": { ... } }
+    "process": {
+      "elements": { ... },
+      "lines": { ... },
+      "sequence": [ { "order": 1, "type": "transport", "lineId": "...", "duration": 420 } ]
+    }
   }
 }
 ```
@@ -540,13 +659,17 @@ Migracions existents a `MODEL_MIGRATIONS`:
 - **v1 → v2**: els punts de connexió de la desviadora es deien
   `input`/`output`/`output2` i ara es diuen `common`/`branch`/`branch2`.
 
+La **seqüència** (§3.2) es va afegir a `state.process.sequence` sense pujar
+la versió: és un camp opcional i els arxius que no en porten obren amb la
+seqüència buida, que és el que toca.
+
 Quan una etapa futura necessiti un canvi que trenqui alguna cosa: pugeu
 `FILE_VERSION` i afegiu `MODEL_MIGRATIONS[n]`. `migrateModel()` les encadena
 totes.
 
 ---
 
-## 9. La interfície (`script.js`)
+## 10. La interfície de configuració (`script.js`)
 
 ### Panell de configuració de procés
 
@@ -579,7 +702,7 @@ la configuració d'una línia n'actualitzi el text **sense** refer la detecció
 
 ---
 
-## 10. Regles que no s'han de trencar
+## 11. Regles que no s'han de trencar
 
 1. **`process.js` no toca el DOM.** Si cal la topologia, es passa plana des
    de `script.js` amb `buildProcessGraph()`.
@@ -603,10 +726,18 @@ la configuració d'una línia n'actualitzi el text **sense** refer la detecció
     estat entre crides, el mateix instant deixarà de donar el mateix
     resultat i tot el disseny se'n va en orris.
 12. **Els errors es detecten abans de començar**, mai enmig del càlcul.
+13. **La interfície de simulació no calcula res.** Tot número que es veu
+    ve de `stateAt()` o de `compiled.actions`. El bucle només mou un
+    rellotge.
+14. **La simulació no modifica mai el projecte.** Ni el model de procés ni
+    el diagrama. Stop només torna el rellotge a zero.
+15. **La velocitat no pot alterar el resultat**: només multiplica la
+    rapidesa amb què avança `simTime`.
+16. **No es compila a cada imatge ni en moure el cursor.** Vegeu §8.2.
 
 ---
 
-## 11. Paranys coneguts
+## 12. Paranys coneguts
 
 - **`clearAll()` reinicia `elementCount` a 0**, de manera que un element nou
   podria rebre l'identificador d'un d'esborrat. Per això `clearAll()` també
@@ -634,6 +765,13 @@ la configuració d'una línia n'actualitzi el text **sense** refer la detecció
   magatzems amb productes diferents sense que salti cap error. La
   comprovació de productes és per línia (origen contra destí) i un producte
   en blanc no contradiu res.
+- **La seqüència guarda la signatura de la línia** (§4), no el seu número.
+  Si es refà el diagrama de manera que la línia deixi d'existir, l'acció es
+  queda apuntant a una línia que ja no hi és i el motor ho diu amb
+  `missing-line`. És el comportament correcte, però convé saber-ho.
+- **`refreshSimulationIfOpen()` penja de `pushHistory()`**, que es crida
+  després de cada acció de l'usuari. Només fa feina si el panell és obert;
+  si algun dia es fes servir per a alguna cosa més cara, caldrà repassar-ho.
 
 ---
 
@@ -641,15 +779,12 @@ la configuració d'una línia n'actualitzi el text **sense** refer la detecció
 
 Res d'això existeix, ni tan sols començat, i no s'ha de donar per fet:
 
-- **Cap element d'interfície de simulació**: ni botons, ni panells, ni
-  modals, ni botó de càlcul de temps.
-- Editor visual de seqüències (l'estructura de dades sí, §3.2; l'editor no).
-- Play / Pausa / Stop, velocitats, cronograma, cursor temporal.
-- Barres de nivell o percentatges sobre els elements del diagrama.
-- Animacions de flux, partícules, ressaltat de línia activa.
-- Tooltips de simulació, resums, informes.
-- Desar la seqüència a l'arxiu del projecte (§3.2).
-- El pont que construeix l'escenari a partir del diagrama (§6.1).
+- **Barres de nivell o percentatges sobre els elements del diagrama.** Els
+  números es veuen només a les llistes del panell de simulació (§8.6).
+- Ressaltat de la línia activa al canvas durant la simulació.
+- Animacions de flux, partícules, moviment visual del producte.
+- Tooltips de simulació sobre els elements del diagrama.
+- Resum final de simulació o informes.
 - Física de barrido i posada a règim (§6.5).
 - Accions en paral·lel. L'execució és estrictament seqüencial. Els trams
   porten inici i final **absoluts**, de manera que el dia que calgui
@@ -658,6 +793,8 @@ Res d'això existeix, ni tan sols començat, i no s'ha de donar per fet:
 
 Idees anotades i **no** implementades a propòsit: poder posar nom als
 elements sense rol; avisar quan un punt de consum sense producte rep de dos
-magatzems amb productes diferents (§11); avisar quan una acció queda
-incompleta (avui es veu a `compiled.actions[].complete`, però no genera cap
-avís propi).
+magatzems amb productes diferents (§12); avisar quan una acció queda
+incompleta amb un avís propi (avui es veu a `compiled.actions[].complete`,
+al cronograma i a la columna «Estimació», però no surt a la llista d'avisos);
+duplicar una acció de la seqüència; i reordenar-la arrossegant les files en
+comptes d'amb les fletxes.

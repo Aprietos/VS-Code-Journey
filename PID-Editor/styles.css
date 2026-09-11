@@ -1048,6 +1048,507 @@ select.process-field__input {
 }
 
 /* =====================================================================
+   Interfície de simulació
+   ---------------------------------------------------------------------
+   Acoblada a baix de tot, no flotant: hi ha d'entrar un cronograma
+   horitzontal i tres columnes, i així no tapa el diagrama sinó que li
+   pren l'alçada que li cal. Fa servir els mateixos tokens, botons i
+   targetes que la resta de l'aplicació.
+   ===================================================================== */
+
+#sim-panel {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  height: 340px;
+  background: var(--ui-surface);
+  border-top: 1px solid var(--ui-border);
+}
+
+#sim-panel[hidden] {
+  display: none;
+}
+
+/* ---- Barra superior: títol, transport, velocitat i rellotge ---- */
+
+.sim-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex: none;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--ui-border);
+}
+
+.sim-bar__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--size-section);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ui-text-secondary);
+}
+
+.sim-bar__title .icon {
+  color: var(--ui-primary);
+}
+
+.sim-transport {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sim-transport .btn--outline {
+  width: 30px;
+  padding: 0;
+  justify-content: center;
+}
+
+.sim-speed {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sim-speed__label {
+  color: var(--ui-text-secondary);
+  font-size: var(--size-small);
+}
+
+.sim-speed .process-field__input {
+  width: auto;
+  min-width: 76px;
+}
+
+/* El rellotge en xifres de gruix fix: així els números no ballen mentre
+   avança el temps. */
+.sim-clock {
+  margin: 0 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ui-text);
+}
+
+/* ---- Errors i avisos de la validació ---- */
+
+.sim-issues {
+  flex: none;
+  max-height: 84px;
+  overflow-y: auto;
+  margin: var(--space-3) var(--space-4) 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--size-small);
+  line-height: 1.45;
+}
+
+.sim-issues[hidden] {
+  display: none;
+}
+
+.sim-issues--error {
+  background: var(--ui-danger-soft);
+  color: var(--ui-danger);
+}
+
+.sim-issues--warn {
+  background: var(--ui-sunken);
+  color: var(--ui-text-secondary);
+}
+
+.sim-issues p {
+  margin: 0 0 var(--space-1);
+}
+
+.sim-issues p:last-child {
+  margin-bottom: 0;
+}
+
+.sim-issues__heading {
+  font-weight: 600;
+}
+
+/* ---- Cronograma ---- */
+
+.sim-timeline {
+  flex: none;
+  padding: var(--space-3) var(--space-4) var(--space-2);
+}
+
+.sim-timeline__ticks {
+  position: relative;
+  height: 15px;
+  margin-bottom: 2px;
+}
+
+.sim-timeline__tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  color: var(--ui-text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* La pista sencera és la zona clicable: clicar-hi salta a aquell instant
+   i arrossegar-hi mou el cursor. */
+.sim-timeline__track {
+  position: relative;
+  height: 46px;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--radius-md);
+  background: var(--ui-sunken);
+  cursor: pointer;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.sim-timeline__track:focus-visible {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: 2px;
+}
+
+.sim-timeline__blocks {
+  position: absolute;
+  inset: 0;
+}
+
+.sim-block {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0 var(--space-2);
+  border-left: 1px solid var(--ui-surface);
+  background: var(--ui-primary-soft);
+  color: var(--ui-primary-dark);
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.sim-block:first-child {
+  border-left: none;
+}
+
+/* Les accions que no mouen producte es distingeixen sense fer servir cap
+   color nou: només fons més apagat. */
+.sim-block--idle {
+  background: var(--ui-sunken);
+  color: var(--ui-text-muted);
+  box-shadow: inset 0 0 0 1px var(--ui-border);
+}
+
+/* Acció que s'ha quedat curta perquè el magatzem s'ha buidat. */
+.sim-block--short {
+  background: var(--ui-danger-soft);
+  color: var(--ui-danger);
+}
+
+.sim-block__name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sim-block__line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sim-timeline__cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ui-primary-dark);
+  pointer-events: none;
+}
+
+.sim-timeline__cursor::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  width: 11px;
+  height: 11px;
+  transform: translateX(-50%);
+  border-radius: 0 0 3px 3px;
+  background: var(--ui-primary-dark);
+}
+
+/* ---- Les tres columnes ---- */
+
+.sim-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: var(--space-4);
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-2) var(--space-4) var(--space-4);
+}
+
+.sim-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+}
+
+.sim-col__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.sim-total {
+  color: var(--ui-text-secondary);
+  font-size: var(--size-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ---- Taula de la seqüència ---- */
+
+.sim-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--size-small);
+}
+
+.sim-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0 var(--space-2) var(--space-1);
+  background: var(--ui-surface);
+  border-bottom: 1px solid var(--ui-border);
+  color: var(--ui-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.sim-table td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--ui-border);
+  vertical-align: middle;
+}
+
+.sim-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* Fila de l'acció que s'està reproduint ara mateix. */
+.sim-table tr.is-current td {
+  background: var(--ui-primary-soft);
+}
+
+.sim-row__order {
+  width: 1.5rem;
+  color: var(--ui-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-row__actions {
+  width: 1px;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.sim-table .process-field__input {
+  height: 26px;
+  padding: 0 var(--space-2);
+  font-size: var(--size-small);
+}
+
+.sim-row__duration {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.sim-row__duration .process-field__input {
+  width: 4.2rem;
+}
+
+.sim-row__unit {
+  color: var(--ui-text-muted);
+  font-size: 11px;
+}
+
+/* Producte, rendiment i kg que el motor calcula per a aquesta acció. */
+.sim-row__estimate {
+  color: var(--ui-text-secondary);
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.sim-row__estimate--short {
+  color: var(--ui-danger);
+}
+
+.sim-icon-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ui-text-muted);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.sim-icon-btn:hover:not([disabled]) {
+  background: var(--ui-hover);
+  color: var(--ui-text);
+}
+
+.sim-icon-btn[disabled] {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.sim-icon-btn--danger:hover:not([disabled]) {
+  background: var(--ui-danger-soft);
+  color: var(--ui-danger);
+}
+
+.sim-hint {
+  margin: var(--space-3) 0 0;
+  color: var(--ui-text-muted);
+  font-size: var(--size-small);
+}
+
+.sim-hint[hidden] {
+  display: none;
+}
+
+/* ---- Acció actual i estat del sistema ---- */
+
+.sim-facts {
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  align-content: start;
+  margin: 0;
+  font-size: var(--size-small);
+}
+
+.sim-facts dt {
+  color: var(--ui-text-muted);
+  white-space: nowrap;
+}
+
+.sim-facts dd {
+  margin: 0;
+  color: var(--ui-text);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sim-facts dd.is-short {
+  color: var(--ui-danger);
+}
+
+.sim-state {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--size-small);
+}
+
+.sim-state__group {
+  margin: var(--space-1) 0 2px;
+  color: var(--ui-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.sim-state__group:first-child {
+  margin-top: 0;
+}
+
+.sim-state__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.sim-state__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-text-secondary);
+}
+
+.sim-state__value {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Punt de consum que ha passat de la seva capacitat. */
+.sim-state__value.is-over {
+  color: var(--ui-danger);
+}
+
+/* ---- Finestres estretes ---- */
+
+@media (max-width: 1100px) {
+  .sim-columns {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  }
+
+  .sim-col:last-child {
+    grid-column: 1 / -1;
+  }
+
+  #sim-panel {
+    height: 400px;
+  }
+}
+
+@media (max-width: 860px) {
+  .sim-bar {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .sim-clock {
+    margin-left: 0;
+  }
+
+  .sim-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* =====================================================================
    Menú contextual
    ===================================================================== */
 
