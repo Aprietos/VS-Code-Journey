@@ -17,6 +17,15 @@ const viewport = document.createElementNS(svgNS, 'g');
 viewport.id = 'viewport';
 canvas.appendChild(viewport);
 
+// Capa on es dibuixa la simulació (barres de nivell i flux de producte).
+// És GERMANA del viewport, no filla, per dues raons: així el que hi ha
+// dibuixat no entra a viewport.getBBox() (i per tant no desquadra
+// "Enquadra-ho tot"), i es pot buidar sencera sense tocar el diagrama.
+// Porta el mateix transform que el viewport, que li posa applyViewport().
+const simOverlay = document.createElementNS(svgNS, 'g');
+simOverlay.id = 'sim-overlay';
+canvas.appendChild(simOverlay);
+
 let viewX = 0;
 let viewY = 0;
 let viewScale = 1;
@@ -38,7 +47,12 @@ function dotSpacing() {
 }
 
 function applyViewport() {
-  viewport.setAttribute('transform', `translate(${viewX}, ${viewY}) scale(${viewScale})`);
+  const transform = `translate(${viewX}, ${viewY}) scale(${viewScale})`;
+  viewport.setAttribute('transform', transform);
+  simOverlay.setAttribute('transform', transform);
+  // Les etiquetes de les barres van a mida fixa de pantalla: el seu
+  // contra-escalat depèn del zoom i s'ha de refer en canviar-lo.
+  updateSimLabelScale();
   // La malla de punts del fons és CSS, no SVG: cal moure-la i espaiar-la a
   // mà perquè continuï alineada amb el contingut.
   const spacing = dotSpacing();
@@ -3240,6 +3254,10 @@ let simResumeAfterScrub = false;
 let simFactNodes = {};
 let simValueNodes = { storages: {}, consumptions: {} };
 
+// Recorregut de cada línia detectada, per a la capa visual (vegeu
+// buildSimulationScenario).
+let simLineRoutes = {};
+
 // ---- Format ----
 function formatClock(seconds) {
   const total = Math.max(0, Math.round(Number(seconds) || 0));
@@ -3286,9 +3304,15 @@ function buildSimulationScenario() {
   });
 
   const graph = buildProcessGraph();
+  simLineRoutes = {};
 
   findTransportLines().lines.forEach((line) => {
     const signature = ProcessModel.lineSignature(line);
+    // El recorregut (elements i canonades, en ordre) no entra a l'escenari
+    // perquè el motor no en fa res, però el necessita la capa visual per
+    // saber quines canonades ha de destacar i per on han d'anar les
+    // partícules del flux.
+    simLineRoutes[signature] = line;
     const config = ProcessModel.getLine(signature);
     const source = ProcessModel.resolvePickupSource(graph, line.pickupPointId, canCrossElement);
 
@@ -3337,6 +3361,7 @@ function refreshSimulation() {
   renderSimSequence();
   renderSimTimeline();
   buildSimStateShell();
+  buildSimBars();
   renderSimNow();
   updateSimControls();
 }
@@ -3352,6 +3377,9 @@ function refreshSimulationIfOpen() {
 function setSimTime(seconds) {
   simTime = Math.min(Math.max(Number(seconds) || 0, 0), simCompiled ? simCompiled.totalDuration : 0);
   renderSimNow();
+  // Els botons han de reflectir sempre on som: arrossegar el cursor fora
+  // del zero ha de tornar a activar Stop, per exemple.
+  updateSimControls();
 }
 
 function simTick(now) {
@@ -3359,6 +3387,10 @@ function simTick(now) {
 
   const realSeconds = (now - simLastFrame) / 1000;
   simLastFrame = now;
+  // Les partícules del flux avancen amb el temps REAL, no amb el de
+  // simulació: si anessin amb el segon, a 10x es convertirien en una
+  // ratlla borrosa i a 0,25x semblarien aturades.
+  simFlowPhase += realSeconds * SIM_FLOW_SPEED;
   setSimTime(simTime + realSeconds * SIM_SECONDS_PER_REAL_SECOND * Number(simSpeedSelect.value));
 
   if (simTime >= simCompiled.totalDuration) {
@@ -3733,6 +3765,8 @@ function renderSimNow() {
     Object.values(simValueNodes).forEach((bucket) => {
       Object.values(bucket).forEach((node) => { node.textContent = '—'; });
     });
+    clearSimVisuals();
+    renderSimSummary(null);
     return;
   }
 
@@ -3776,6 +3810,9 @@ function renderSimNow() {
   [...simRows.children].forEach((row, index) => {
     row.classList.toggle('is-current', Boolean(action) && index === action.order - 1);
   });
+
+  renderSimVisuals(state);
+  renderSimSummary(state);
 }
 
 // ---- Cursor arrossegable ----
@@ -3844,11 +3881,20 @@ function closeSimPanel() {
   pauseSimulation();
   simPanel.hidden = true;
   simToggle.setAttribute('aria-expanded', 'false');
+  // L'aspecte del diagrama torna exactament al d'abans.
+  clearSimVisuals();
+  hideSimTip();
 }
 
 simToggle.addEventListener('click', () => {
   if (simPanel.hidden) openSimPanel();
   else closeSimPanel();
+});
+
+// Amb la pestanya amagada el navegador deixa de donar imatges. Si no es
+// posés en pausa, en tornar-hi el primer salt de temps seria enorme.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && simPlaying) pauseSimulation();
 });
 
 simCloseButton.addEventListener('click', closeSimPanel);
@@ -3871,6 +3917,552 @@ simAddButton.addEventListener('click', () => {
 });
 
 buildSimFactsShell();
+
+// ---- Capa visual de la simulació ----
+// Dibuixa sobre el diagrama el que el motor diu que hi ha: el nivell de
+// cada element, quina línia treballa i el producte viatjant-hi. Com la
+// resta de la interfície de simulació, AQUÍ NO S'HI CALCULA RES: tot surt
+// de l'estat que retorna SimulationEngine.stateAt().
+//
+// Tot el que dibuixa és temporal i viu a #sim-overlay, una capa a part amb
+// pointer-events: none. Tancar el panell la buida i el diagrama torna
+// exactament a l'aspecte d'abans.
+
+const simTip = document.getElementById('sim-tip');
+const simSummaryHost = document.getElementById('sim-summary');
+
+// Velocitat de les partícules, en unitats de món per segon real. És un
+// valor de lectura, no físic: no vol dir res sobre la velocitat real del
+// producte, només serveix perquè es vegi cap on va.
+const SIM_FLOW_SPEED = 150;
+const SIM_FLOW_SPACING = 46;     // separació entre partícules
+const SIM_MAX_PARTICLES = 28;    // sostre, per no carregar diagrames grans
+
+let simFlowPhase = 0;
+let simBarNodes = new Map();     // id d'element -> nodes de la seva barra
+let simFlowNodes = [];
+let simFlowChain = null;
+let simFlowLineId = '';
+
+const simReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+// ---- Geometria ----
+// Caixa del DIBUIX d'un element en coordenades de món. Es descarten els
+// punts de connexió i el distintiu de rol, que sobresurten de la forma i
+// farien que la barra no s'hi ajustés.
+function elementDrawingBox(element) {
+  const matrix = getLocalMatrix(element);
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  [...element.children].forEach((child) => {
+    if (child.tagName === 'title') return;
+    if (child.classList && (child.classList.contains('connection-point')
+      || child.classList.contains('role-badge'))) return;
+    if (typeof child.getBBox !== 'function') return;
+
+    const box = child.getBBox();
+    if (!box.width && !box.height) return;
+
+    // El dibuix pot anar dins d'un <g> amb la seva pròpia reducció de mida
+    // (vegeu applyShapeScale), que getBBox() no inclou.
+    let full = matrix;
+    const list = child.transform.baseVal;
+    for (let i = 0; i < list.numberOfItems; i += 1) full = full.multiply(list.getItem(i).matrix);
+
+    [[box.x, box.y], [box.x + box.width, box.y],
+      [box.x, box.y + box.height], [box.x + box.width, box.y + box.height]].forEach(([x, y]) => {
+      const point = canvas.createSVGPoint();
+      point.x = x;
+      point.y = y;
+      const world = point.matrixTransform(full);
+      minX = Math.min(minX, world.x);
+      minY = Math.min(minY, world.y);
+      maxX = Math.max(maxX, world.x);
+      maxY = Math.max(maxY, world.y);
+    });
+  });
+
+  if (!Number.isFinite(minX)) return null;
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+// ---- Barres de nivell ----
+// Quins elements en porten: NOMÉS els que participen de debò a la
+// seqüència, és a dir els magatzems i els punts de consum de les línies
+// que fa servir alguna acció de transport. La resta del diagrama es queda
+// neta.
+function simParticipants() {
+  const storages = new Set();
+  const consumptions = new Set();
+  if (!simScenario) return { storages, consumptions };
+
+  simScenario.actions.forEach((action) => {
+    const line = simScenario.lines[action.lineId];
+    if (!line) return;
+    if (simScenario.storages[line.storageId]) storages.add(line.storageId);
+    if (simScenario.consumptions[line.consumptionId]) consumptions.add(line.consumptionId);
+  });
+
+  return { storages, consumptions };
+}
+
+function simBarGroup(elementId, bucket) {
+  const element = viewport.querySelector(`.pid-element[data-id="${elementId}"]`);
+  const box = element ? elementDrawingBox(element) : null;
+  if (!box) return null;
+
+  const group = svgEl('g', { class: 'sim-bar' });
+  const track = svgEl('rect', {
+    class: 'sim-bar__track', x: box.x, y: box.y, width: box.width, height: box.height, rx: 2,
+  });
+  const fill = svgEl('rect', { class: 'sim-bar__fill', x: box.x, width: box.width, y: box.y, height: 0 });
+  const level = svgEl('line', { class: 'sim-bar__level', x1: box.x, x2: box.x + box.width, y1: box.y, y2: box.y });
+
+  const label = svgEl('g', { class: 'sim-bar__label' });
+  const kg = svgEl('text', { class: 'sim-bar__kg', x: 0, y: 0 });
+  const pct = svgEl('text', { class: 'sim-bar__pct', x: 0, y: 13 });
+  label.append(kg, pct);
+
+  group.append(track, fill, level, label);
+  simOverlay.appendChild(group);
+
+  return { group, box, fill, level, label, kg, pct, bucket };
+}
+
+// Les etiquetes van a mida fixa de pantalla: es contra-escalen amb el zoom
+// perquè es puguin llegir tant si el diagrama és molt petit com molt gros.
+function updateSimLabelScale() {
+  if (!simBarNodes || !simBarNodes.size) return;
+  simBarNodes.forEach((bar) => {
+    const x = bar.box.x + bar.box.width / 2;
+    const y = bar.box.y + bar.box.height + 14 / viewScale;
+    bar.label.setAttribute('transform', `translate(${x}, ${y}) scale(${1 / viewScale})`);
+  });
+}
+
+function buildSimBars() {
+  simBarNodes.forEach((bar) => bar.group.remove());
+  simBarNodes = new Map();
+  if (!simScenario || !simCompiled || !simCompiled.ok) return;
+
+  const { storages, consumptions } = simParticipants();
+  storages.forEach((id) => {
+    const bar = simBarGroup(id, 'storages');
+    if (bar) simBarNodes.set(id, bar);
+  });
+  consumptions.forEach((id) => {
+    const bar = simBarGroup(id, 'consumptions');
+    if (bar) simBarNodes.set(id, bar);
+  });
+
+  updateSimLabelScale();
+}
+
+// Percentatge honest: si no hi ha capacitat definida no se n'inventa cap,
+// i llavors només es veuen els quilos.
+function simLevelRatio(value, capacity) {
+  if (!(capacity > 0)) return null;
+  return Math.min(Math.max(value / capacity, 0), 1);
+}
+
+function renderSimBars(state) {
+  simBarNodes.forEach((bar, id) => {
+    const value = state[bar.bucket][id];
+    const entry = simScenario[bar.bucket][id];
+    const capacity = Number(entry.capacity) || 0;
+    const ratio = simLevelRatio(value, capacity);
+
+    // Sense capacitat, la barra no es pot omplir de manera honesta: es
+    // deixa buida i només parla el número.
+    const height = ratio === null ? 0 : bar.box.height * ratio;
+    const top = bar.box.y + bar.box.height - height;
+
+    bar.fill.setAttribute('y', top);
+    bar.fill.setAttribute('height', height);
+    bar.level.setAttribute('y1', top);
+    bar.level.setAttribute('y2', top);
+    bar.level.style.display = ratio === null ? 'none' : '';
+
+    bar.kg.textContent = `${ProcessModel.formatKg(value)} kg`;
+    bar.pct.textContent = ratio === null ? 'sense capacitat' : `${Math.round(ratio * 100)} %`;
+
+    bar.group.classList.toggle('sim-bar--empty', value <= 0);
+    bar.group.classList.toggle('sim-bar--over', capacity > 0 && value > capacity);
+  });
+}
+
+// ---- Línia activa ----
+// Classes pròpies, a part de les del ressaltat del panell de línies: així
+// les dues coses conviuen i aturar la simulació no esborra el ressaltat
+// que l'usuari hagi fixat.
+function clearSimActiveLine() {
+  viewport.querySelectorAll('.pipe-path--active')
+    .forEach((node) => node.classList.remove('pipe-path--active'));
+  viewport.querySelectorAll('.pid-element--active')
+    .forEach((node) => node.classList.remove('pid-element--active'));
+}
+
+function renderSimActiveLine(lineId) {
+  clearSimActiveLine();
+  const route = lineId ? simLineRoutes[lineId] : null;
+  if (!route) return;
+
+  const connectors = new Set(route.pathConnectorIds);
+  pipes.forEach((pipe) => {
+    if (connectors.has(pipeKey(pipe))) pipe.path.classList.add('pipe-path--active');
+  });
+
+  const elements = new Set(route.pathElementIds);
+  viewport.querySelectorAll('.pid-element:not(.pipe)').forEach((node) => {
+    if (elements.has(node.dataset.id)) node.classList.add('pid-element--active');
+  });
+}
+
+// ---- Flux del producte ----
+// Les canonades del recorregut, encadenades i orientades en el sentit
+// recollida -> consum, que és el que dona sentit a l'animació.
+function buildSimFlowChain(lineId) {
+  const route = simLineRoutes[lineId];
+  if (!route) return null;
+
+  const byKey = new Map();
+  pipes.forEach((pipe) => byKey.set(pipeKey(pipe), pipe));
+
+  const segments = [];
+  let total = 0;
+
+  route.pathConnectorIds.forEach((key, index) => {
+    const pipe = byKey.get(key);
+    if (!pipe) return;
+
+    const length = pipe.path.getTotalLength();
+    if (!length) return;
+
+    // Si la canonada es va dibuixar del consum cap a la recollida, es
+    // recorre de final a principi.
+    const forward = pipe.from.element.dataset.id === route.pathElementIds[index];
+    segments.push({ path: pipe.path, length, forward, offset: total });
+    total += length;
+  });
+
+  return total ? { segments, total } : null;
+}
+
+function simFlowPoint(chain, distance) {
+  const along = ((distance % chain.total) + chain.total) % chain.total;
+  const segment = chain.segments.find((item) => along < item.offset + item.length)
+    || chain.segments[chain.segments.length - 1];
+  const local = along - segment.offset;
+  return segment.path.getPointAtLength(segment.forward ? local : segment.length - local);
+}
+
+function clearSimFlow() {
+  simFlowNodes.forEach((node) => node.remove());
+  simFlowNodes = [];
+  simFlowChain = null;
+  simFlowLineId = '';
+}
+
+function renderSimFlow(lineId) {
+  // Sense línia activa, amb la preferència de reduir moviment o amb la
+  // reproducció aturada no hi ha res a animar.
+  if (!lineId || simReducedMotion.matches) {
+    if (simFlowNodes.length) clearSimFlow();
+    return;
+  }
+
+  if (lineId !== simFlowLineId) {
+    clearSimFlow();
+    simFlowChain = buildSimFlowChain(lineId);
+    simFlowLineId = lineId;
+
+    if (simFlowChain) {
+      const count = Math.min(SIM_MAX_PARTICLES,
+        Math.max(3, Math.round(simFlowChain.total / SIM_FLOW_SPACING)));
+      for (let i = 0; i < count; i += 1) {
+        const dot = svgEl('circle', { class: 'sim-flow__dot', r: 2.6, cx: 0, cy: 0 });
+        simOverlay.appendChild(dot);
+        simFlowNodes.push(dot);
+      }
+    }
+  }
+
+  if (!simFlowChain) return;
+
+  const gap = simFlowChain.total / simFlowNodes.length;
+  simFlowNodes.forEach((dot, index) => {
+    const point = simFlowPoint(simFlowChain, simFlowPhase + index * gap);
+    dot.setAttribute('cx', point.x);
+    dot.setAttribute('cy', point.y);
+  });
+}
+
+// ---- Punt d'entrada de la capa visual ----
+function renderSimVisuals(state) {
+  renderSimBars(state);
+  renderSimActiveLine(state.activeLineId);
+  renderSimFlow(state.activeLineId);
+}
+
+function clearSimVisuals() {
+  simBarNodes.forEach((bar) => bar.group.remove());
+  simBarNodes = new Map();
+  clearSimFlow();
+  clearSimActiveLine();
+}
+
+// ---- Resum ----
+// Retorna una estructura plana pensada per poder-se convertir en un
+// informe més endavant; de moment només es pinta.
+function buildSimSummary(state) {
+  const lines = Object.keys(state.lines)
+    .filter((id) => state.lines[id] > 0)
+    .map((id) => ({ id, name: simLineName(id), transferred: state.lines[id] }))
+    .sort((a, b) => b.transferred - a.transferred);
+
+  const totalTransported = lines.reduce((sum, line) => sum + line.transferred, 0);
+
+  const storages = Object.keys(state.storages).sort().map((id) => ({
+    id,
+    name: simScenario.storages[id].name,
+    remaining: state.storages[id],
+    capacity: Number(simScenario.storages[id].capacity) || 0,
+  }));
+
+  const consumptions = Object.keys(state.consumptions).sort().map((id) => ({
+    id,
+    name: simScenario.consumptions[id].name,
+    received: state.consumptions[id],
+    capacity: Number(simScenario.consumptions[id].capacity) || 0,
+  }));
+
+  // Incidències: les que ja han passat en aquest instant, no les de tota
+  // la seqüència. Surten totes del motor.
+  const emptied = state.warnings.filter((issue) => issue.code === 'storage-will-empty');
+  const overCapacity = state.warnings.filter((issue) => issue.code === 'capacity-exceeded');
+  const incomplete = simCompiled.actions.filter((action) => (
+    !action.complete && action.startTime < state.time
+  ));
+
+  return {
+    totalDuration: simCompiled.totalDuration,
+    elapsed: state.time,
+    totalTransported,
+    lines,
+    storages,
+    consumptions,
+    incidents: { emptied, overCapacity, incomplete },
+  };
+}
+
+function simSummaryRow(label, value, modifier) {
+  const row = document.createElement('div');
+  row.className = modifier ? `sim-summary__row sim-summary__row--${modifier}` : 'sim-summary__row';
+
+  const name = document.createElement('span');
+  name.className = 'sim-summary__label';
+  name.textContent = label;
+
+  const amount = document.createElement('span');
+  amount.className = 'sim-summary__value';
+  amount.textContent = value;
+
+  row.append(name, amount);
+  return row;
+}
+
+function simSummaryGroup(text) {
+  const heading = document.createElement('p');
+  heading.className = 'sim-summary__group';
+  heading.textContent = text;
+  return heading;
+}
+
+function renderSimSummary(state) {
+  simSummaryHost.replaceChildren();
+  if (!state || !simCompiled || !simCompiled.ok) {
+    const empty = document.createElement('p');
+    empty.className = 'sim-hint';
+    empty.textContent = 'Encara no hi ha res a resumir.';
+    simSummaryHost.appendChild(empty);
+    return;
+  }
+
+  const summary = buildSimSummary(state);
+
+  simSummaryHost.append(
+    simSummaryRow('Temps', `${formatClock(summary.elapsed)} / ${formatClock(summary.totalDuration)}`),
+    simSummaryRow('Producte transportat', `${ProcessModel.formatKg(summary.totalTransported)} kg`, 'total'),
+  );
+
+  simSummaryHost.appendChild(simSummaryGroup(
+    summary.lines.length === 1 ? 'Línia utilitzada' : `Línies utilitzades (${summary.lines.length})`,
+  ));
+  if (!summary.lines.length) {
+    simSummaryHost.appendChild(simSummaryRow('Cap encara', '—'));
+  } else {
+    summary.lines.forEach((line) => {
+      simSummaryHost.appendChild(simSummaryRow(line.name, `${ProcessModel.formatKg(line.transferred)} kg`));
+    });
+  }
+
+  simSummaryHost.appendChild(simSummaryGroup('Queda als magatzems'));
+  summary.storages.forEach((item) => {
+    simSummaryHost.appendChild(simSummaryRow(item.name, `${ProcessModel.formatKg(item.remaining)} kg`));
+  });
+
+  simSummaryHost.appendChild(simSummaryGroup('Arribat al consum'));
+  summary.consumptions.forEach((item) => {
+    simSummaryHost.appendChild(simSummaryRow(item.name, `${ProcessModel.formatKg(item.received)} kg`));
+  });
+
+  simSummaryHost.appendChild(simSummaryGroup('Incidències'));
+  const incidents = [
+    ...summary.incidents.emptied.map((issue) => issue.message),
+    ...summary.incidents.overCapacity.map((issue) => issue.message),
+    ...summary.incidents.incomplete.map((action) => (
+      `Acció ${action.order} (${actionLabel(action.type)}) va quedar incompleta: `
+      + `només s'han transportat ${ProcessModel.formatKg(action.transferred)} kg.`
+    )),
+  ];
+
+  if (!incidents.length) {
+    const clean = document.createElement('p');
+    clean.className = 'sim-summary__clean';
+    clean.textContent = 'Cap, de moment.';
+    simSummaryHost.appendChild(clean);
+  } else {
+    incidents.forEach((message) => {
+      const line = document.createElement('p');
+      line.className = 'sim-summary__incident';
+      line.textContent = message;
+      simSummaryHost.appendChild(line);
+    });
+  }
+}
+
+// ---- Informació en passar el ratolí ----
+// Només amb la simulació aturada o en pausa: mentre es reprodueix, els
+// números ja canvien sols i una etiqueta que els persegueix fa nosa.
+function simTipRow(label, value, warn) {
+  const row = document.createElement('div');
+  row.className = 'sim-tip__row';
+
+  const name = document.createElement('span');
+  name.className = 'sim-tip__label';
+  name.textContent = label;
+
+  const amount = document.createElement('span');
+  amount.className = warn ? 'sim-tip__value is-warn' : 'sim-tip__value';
+  amount.textContent = value;
+
+  row.append(name, amount);
+  return row;
+}
+
+function simElementTip(elementId, state) {
+  const bucket = simScenario.storages[elementId] ? 'storages'
+    : (simScenario.consumptions[elementId] ? 'consumptions' : '');
+  if (!bucket) return null;
+
+  const entry = simScenario[bucket][elementId];
+  const value = state[bucket][elementId];
+  const capacity = Number(entry.capacity) || 0;
+  const ratio = simLevelRatio(value, capacity);
+
+  const nodes = [];
+  const title = document.createElement('p');
+  title.className = 'sim-tip__title';
+  title.textContent = entry.name;
+  nodes.push(title);
+
+  nodes.push(simTipRow('Producte', entry.product || 'sense definir'));
+  nodes.push(simTipRow(bucket === 'storages' ? 'Quantitat' : 'Rebut',
+    `${ProcessModel.formatKg(value)} kg`, value <= 0 && bucket === 'storages'));
+  nodes.push(simTipRow('Capacitat', capacity > 0 ? `${ProcessModel.formatKg(capacity)} kg` : 'sense definir'));
+  nodes.push(simTipRow('Nivell', ratio === null ? '—' : `${Math.round(ratio * 100)} %`,
+    capacity > 0 && value > capacity));
+
+  return nodes;
+}
+
+function simPipeTip(pipeElement, state) {
+  const pipe = pipes.find((item) => item.group === pipeElement);
+  if (!pipe) return null;
+
+  const key = pipeKey(pipe);
+  const lineId = Object.keys(simLineRoutes).find((id) => (
+    simScenario.lines[id] && simLineRoutes[id].pathConnectorIds.includes(key)
+  ));
+  if (!lineId) return null;
+
+  const line = simScenario.lines[lineId];
+  const active = state.activeLineId === lineId;
+
+  const nodes = [];
+  const title = document.createElement('p');
+  title.className = 'sim-tip__title';
+  title.textContent = line.name;
+  nodes.push(title);
+
+  nodes.push(simTipRow('Rendiment', `${line.throughput} kg/h`));
+  nodes.push(simTipRow('Estat', active ? 'Treballant' : 'Aturada'));
+
+  // Temps acumulat: el que sumen les accions d'aquesta línia que ja han
+  // passat, comptat fins a l'instant actual.
+  const elapsed = simCompiled.actions
+    .filter((action) => action.lineId === lineId && action.startTime < state.time)
+    .reduce((sum, action) => sum + Math.min(state.time, action.endTime) - action.startTime, 0);
+
+  nodes.push(simTipRow('Temps acumulat', formatClock(elapsed)));
+  nodes.push(simTipRow('Producte transferit', `${ProcessModel.formatKg(state.lines[lineId])} kg`));
+  return nodes;
+}
+
+function hideSimTip() {
+  simTip.hidden = true;
+}
+
+function showSimTip(nodes, event) {
+  simTip.replaceChildren(...nodes);
+  simTip.hidden = false;
+
+  // Es col·loca al costat del cursor i es replega si no hi cap.
+  const box = simTip.getBoundingClientRect();
+  const left = Math.min(event.clientX + 16, window.innerWidth - box.width - 8);
+  const top = Math.min(event.clientY + 16, window.innerHeight - box.height - 8);
+  simTip.style.left = `${Math.max(8, left)}px`;
+  simTip.style.top = `${Math.max(8, top)}px`;
+}
+
+canvas.addEventListener('mousemove', (event) => {
+  if (simPanel.hidden || simPlaying || !simCompiled || !simCompiled.ok) {
+    hideSimTip();
+    return;
+  }
+
+  const target = event.target.closest ? event.target.closest('.pid-element') : null;
+  if (!target) {
+    hideSimTip();
+    return;
+  }
+
+  const state = SimulationEngine.stateAt(simCompiled, simTime);
+  const nodes = target.classList.contains('pipe')
+    ? simPipeTip(target, state)
+    : simElementTip(target.dataset.id, state);
+
+  if (!nodes) {
+    hideSimTip();
+    return;
+  }
+  showSimTip(nodes, event);
+});
+
+canvas.addEventListener('mouseleave', hideSimTip);
 
 // Captura inicial (canvas buit), perquè hi hagi alguna cosa a la qual
 // tornar amb "Desfer" just després de la primera acció.

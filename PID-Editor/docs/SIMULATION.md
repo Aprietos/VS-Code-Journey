@@ -4,7 +4,7 @@ Document de referència per a qui continuï el projecte sense haver vist com
 es va fer. Descriu **què hi ha ara mateix** a la capa de dades de procés de
 l'Editor P&ID, on viu cada cosa i quines regles no s'han de trencar.
 
-Escrit en acabar l'**etapa 3**:
+Escrit en acabar l'**etapa 4**, l'última del pla:
 
 - **Etapa 1** — capa de dades de procés: rols d'element, producte,
   quantitats, capacitats, configuració de les línies de transport i
@@ -13,10 +13,11 @@ Escrit en acabar l'**etapa 3**:
   trams, consulta d'estat en qualsevol instant i validació prèvia (§6, §7).
 - **Etapa 3** — **interfície de simulació**: editor de seqüència, controls
   de reproducció, cronograma amb cursor arrossegable i estat numèric (§8).
+- **Etapa 4** — **capa visual sobre el diagrama**: barres de nivell, línia
+  activa destacada, flux de producte, informació en passar el ratolí i
+  resum (§9).
 
-Els números encara es veuen **en llistes**, no sobre el diagrama: les barres
-de nivell, el ressaltat de la línia activa i les animacions són de l'etapa
-següent. Vegeu [Què NO hi ha](#què-no-hi-ha).
+Vegeu [Què NO hi ha](#què-no-hi-ha).
 
 ---
 
@@ -617,7 +618,145 @@ L'usuari escriu **minuts**; es desa en **segons** (`minuts * 60`). El temps
 es mostra `mm:ss` amb `formatClock()`, i els quilos amb un decimal via
 `ProcessModel.formatKg()`.
 
-## 9. Format de guardat
+## 9. La capa visual sobre el diagrama (`script.js`)
+
+Dibuixa sobre el diagrama el que el motor diu que hi ha. Com la resta de la
+interfície de simulació, **no calcula res**: tot surt de l'estat que retorna
+`SimulationEngine.stateAt()`.
+
+Viu a la secció `// ---- Capa visual de la simulació ----`, al final de
+`script.js`.
+
+### 9.1 On es dibuixa: `#sim-overlay`
+
+Un `<g>` **germà** del `#viewport`, no fill seu, penjat directament del
+`<svg>`. Tres raons:
+
+1. El que s'hi dibuixa **no entra a `viewport.getBBox()`**, i per tant no
+   desquadra «Enquadra-ho tot».
+2. Es pot **buidar sencer** sense tocar ni un node del diagrama.
+3. Porta `pointer-events: none`, així que **no pot interferir** amb la
+   selecció, l'arrossegament ni cap altra interacció de l'editor.
+
+`applyViewport()` li posa **el mateix transform** que al viewport, de manera
+que el que hi ha dibuixat es mou i s'escala amb el diagrama.
+
+### 9.2 Barres de nivell
+
+Es dibuixen **dins de la caixa del dibuix** de cada element: un farciment
+translúcid que puja des de baix, la ratlla del nivell i, a sota, els quilos
+i el percentatge.
+
+- **Quina caixa.** `elementDrawingBox(element)` uneix les caixes dels traços
+  de l'element **descartant els punts de connexió i el distintiu de rol**,
+  que sobresurten de la forma. Té en compte la reducció de mida interna
+  (`applyShapeScale`) i la rotació.
+- **A quins elements.** Només als que **participen de debò**: els magatzems
+  i els punts de consum de les línies que fa servir alguna acció de la
+  seqüència (`simParticipants()`). La resta del diagrama es queda neta.
+- **Percentatge honest.** `simLevelRatio()` retorna `null` si no hi ha
+  capacitat definida; llavors la barra es queda buida i només parlen els
+  quilos, amb el text «sense capacitat». **No s'inventa mai cap 100 %.**
+- **Estats.** `.sim-bar--empty` quan arriba a 0 kg (contorn discontinu i
+  vermell) i `.sim-bar--over` quan un punt de consum passa de la seva
+  capacitat (barra clavada al 100 % i pintada d'avís).
+- **Llegibilitat amb zoom.** Les etiquetes van dins d'un `<g>` amb
+  `scale(1 / viewScale)`, de manera que tenen **mida fixa de pantalla**
+  sigui quin sigui el zoom. `updateSimLabelScale()` ho refà des de
+  `applyViewport()`.
+
+`buildSimBars()` munta l'estructura (a cada compilació) i `renderSimBars()`
+només en canvia els números i les alçades (a cada imatge).
+
+### 9.3 Línia activa
+
+`renderSimActiveLine(lineId)` posa `.pipe-path--active` a les canonades del
+recorregut i `.pid-element--active` als seus elements.
+
+**Són classes pròpies, diferents de les `--highlight` del panell de línies.**
+És a posta: així el ressaltat que l'usuari hagi fixat al panell i el de la
+simulació poden conviure, i aturar la simulació no n'esborra cap.
+
+El recorregut el dona `simLineRoutes[lineId]`, que `buildSimulationScenario()`
+omple amb els objectes de `findTransportLines()`. No entra a l'escenari
+perquè el motor no en fa res.
+
+### 9.4 Flux del producte
+
+Partícules recorrent les canonades de la línia activa, en el sentit
+recollida → consum.
+
+`buildSimFlowChain(lineId)` encadena els `<path>` de les canonades del
+recorregut i, per a cadascuna, mira si s'ha de recórrer endavant o enrere
+comparant `pipe.from.element` amb l'ordre del recorregut. Després
+`simFlowPoint()` fa servir `getPointAtLength()` per situar cada partícula.
+
+**Límits de rendiment (tots deliberats):**
+
+| Límit | Valor | Per què |
+| --- | --- | --- |
+| Partícules per línia | `SIM_MAX_PARTICLES` = 28 | sostre dur, independentment de la llargada del recorregut |
+| Separació | `SIM_FLOW_SPACING` = 46 unitats | poques partícules en recorreguts curts |
+| Línies animades alhora | 1 | l'execució és seqüencial: només hi ha una acció activa |
+| Amb `prefers-reduced-motion` | 0 | no es crea cap partícula |
+| Amb la reproducció aturada | no avancen | la fase només creix a `simTick()` |
+| Amb la pestanya amagada | la reproducció es posa en pausa | vegeu §9.7 |
+
+La fase avança amb el **temps real**, no amb el de simulació: si anés amb el
+segon simulat, a 10x seria una ratlla borrosa i a 0,25x semblaria aturada.
+
+Mesurat sobre el model d'exemple de 49 elements i 51 canonades, amb 7 barres
+i 6 accions: **~3,3 ms per imatge**, molt per sota dels 16,7 ms que deixen
+els 60 per segon.
+
+### 9.5 Informació en passar el ratolí
+
+`canvas` escolta `mousemove` i, **només amb la simulació aturada o en
+pausa** (mentre es reprodueix els números ja canvien sols i una etiqueta que
+els persegueix fa nosa), ensenya `#sim-tip` amb el que diu el motor:
+
+- magatzem o punt de consum → producte, quantitat, capacitat, nivell %;
+- canonada → nom de la línia, rendiment, estat, temps acumulat i producte
+  transferit.
+
+Una canonada que no forma part de cap línia detectada no dona etiqueta.
+
+### 9.6 Resum
+
+`buildSimSummary(state)` retorna una **estructura plana** pensada per
+convertir-se en un informe més endavant:
+
+```js
+{
+  totalDuration, elapsed, totalTransported,
+  lines:        [ { id, name, transferred } ],
+  storages:     [ { id, name, remaining, capacity } ],
+  consumptions: [ { id, name, received, capacity } ],
+  incidents: { emptied: [...], overCapacity: [...], incomplete: [...] },
+}
+```
+
+Tot surt de `stateAt()` i de `compiled.actions`. Les incidències són les que
+**ja han passat en aquest instant**, no les de tota la seqüència, de manera
+que el resum quadra sempre amb el que es veu a la pantalla.
+
+`renderSimSummary()` el pinta. **No hi ha cap exportació**, a posta.
+
+### 9.7 Com es restaura l'aspecte normal
+
+`clearSimVisuals()` treu totes les barres, les partícules i les classes
+`--active`. Es crida en tancar el panell i quan la compilació falla.
+
+Com que tot el dibuix viu a `#sim-overlay` i les úniques marques al diagrama
+són dues classes, **tancar la simulació deixa el `viewport` exactament com
+estava**. Hi ha una prova que ho comprova comparant l'HTML del viewport
+abans i després.
+
+A més, `visibilitychange` posa la reproducció **en pausa** quan s'amaga la
+pestanya: el navegador deixa de donar imatges i, si no es fes, en tornar-hi
+el primer salt de temps seria enorme.
+
+## 10. Format de guardat
 
 Un arxiu `.pid.json` és:
 
@@ -669,7 +808,7 @@ totes.
 
 ---
 
-## 10. La interfície de configuració (`script.js`)
+## 11. La interfície de configuració (`script.js`)
 
 ### Panell de configuració de procés
 
@@ -702,7 +841,7 @@ la configuració d'una línia n'actualitzi el text **sense** refer la detecció
 
 ---
 
-## 11. Regles que no s'han de trencar
+## 12. Regles que no s'han de trencar
 
 1. **`process.js` no toca el DOM.** Si cal la topologia, es passa plana des
    de `script.js` amb `buildProcessGraph()`.
@@ -734,10 +873,17 @@ la configuració d'una línia n'actualitzi el text **sense** refer la detecció
 15. **La velocitat no pot alterar el resultat**: només multiplica la
     rapidesa amb què avança `simTime`.
 16. **No es compila a cada imatge ni en moure el cursor.** Vegeu §8.2.
+17. **La capa visual es dibuixa fora del `viewport`**, a `#sim-overlay`, amb
+    `pointer-events: none`. Res del que hi ha dibuixat pot interferir amb
+    l'editor ni sobreviure al tancament del panell.
+18. **Els percentatges són honestos**: sense capacitat definida no se
+    n'inventa cap (§9.2).
+19. **El ressaltat de la simulació té classes pròpies** (`--active`),
+    diferents de les del panell de línies (`--highlight`). No es barregen.
 
 ---
 
-## 12. Paranys coneguts
+## 13. Paranys coneguts
 
 - **`clearAll()` reinicia `elementCount` a 0**, de manera que un element nou
   podria rebre l'identificador d'un d'esborrat. Per això `clearAll()` també
@@ -779,22 +925,34 @@ la configuració d'una línia n'actualitzi el text **sense** refer la detecció
 
 Res d'això existeix, ni tan sols començat, i no s'ha de donar per fet:
 
-- **Barres de nivell o percentatges sobre els elements del diagrama.** Els
-  números es veuen només a les llistes del panell de simulació (§8.6).
-- Ressaltat de la línia activa al canvas durant la simulació.
-- Animacions de flux, partícules, moviment visual del producte.
-- Tooltips de simulació sobre els elements del diagrama.
-- Resum final de simulació o informes.
+- **Exportació del resum**: informes, PDF, impressió. L'estructura hi és
+  (§9.6), la sortida no.
+- Guardar els resultats d'una simulació a l'arxiu.
 - Física de barrido i posada a règim (§6.5).
+- Accions simultànies o en paral·lel a la seqüència.
+- Càlcul de pressions o de cabals a partir del diàmetre i la longitud, que
+  es desen però encara no es fan servir per a res.
 - Accions en paral·lel. L'execució és estrictament seqüencial. Els trams
   porten inici i final **absoluts**, de manera que el dia que calgui
   permetre solapaments el que canviarà és com es decideixen aquests
   inicis, no la resta del motor.
 
-Idees anotades i **no** implementades a propòsit: poder posar nom als
-elements sense rol; avisar quan un punt de consum sense producte rep de dos
-magatzems amb productes diferents (§12); avisar quan una acció queda
-incompleta amb un avís propi (avui es veu a `compiled.actions[].complete`,
-al cronograma i a la columna «Estimació», però no surt a la llista d'avisos);
-duplicar una acció de la seqüència; i reordenar-la arrossegant les files en
-comptes d'amb les fletxes.
+### Idees per a més endavant
+
+Anotades pel camí i **no** implementades a propòsit:
+
+- Exportar el resum (§9.6 ja deixa l'estructura a punt).
+- Poder posar nom als elements sense rol.
+- Avisar quan un punt de consum sense producte rep de dos magatzems amb
+  productes diferents (§13).
+- Un avís propi a la llista quan una acció queda incompleta (avui es veu al
+  cronograma, a la columna «Estimació» i al resum, però no entre els avisos
+  del motor).
+- Duplicar una acció de la seqüència, i reordenar-la arrossegant les files
+  en comptes d'amb les fletxes.
+- Que la barra de nivell segueixi la silueta real de l'element (avui fa
+  servir la caixa del seu dibuix, §9.2), amb un `clipPath` per element.
+- Marcar al cronograma l'instant exacte en què cada magatzem es buida: el
+  motor ja el dona a `compiled.keyTimes`.
+- Fer servir el diàmetre i la longitud de les línies per a alguna cosa: avui
+  es desen i es mostren, però cap càlcul no en depèn.

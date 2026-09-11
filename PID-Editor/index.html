@@ -290,6 +290,12 @@
         <h3 id="sim-state-title" class="lines-panel__subtitle">Estat del sistema</h3>
         <div id="sim-state" class="sim-state"></div>
       </section>
+
+      <!-- Resum: el mateix que es veu, però sumat. -->
+      <section class="sim-col" aria-labelledby="sim-summary-title">
+        <h3 id="sim-summary-title" class="lines-panel__subtitle">Resum</h3>
+        <div id="sim-summary" class="sim-summary"></div>
+      </section>
     </div>
   </section>
 
@@ -340,6 +346,11 @@
       <button id="process-cancel" type="button" class="process-panel__cancel">Cancel·la</button>
     </div>
   </aside>
+
+  <!-- Informació en passar el ratolí per sobre del diagrama amb la
+       simulació aturada. És HTML fix per sobre de l'SVG, com el menú
+       contextual i els marcs de selecció. -->
+  <div id="sim-tip" class="sim-tip" role="tooltip" hidden></div>
 
   <script src="process.js"></script>
   <script src="simulation.js"></script>

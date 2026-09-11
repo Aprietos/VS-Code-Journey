@@ -1291,7 +1291,7 @@ select.process-field__input {
 
 .sim-columns {
   display: grid;
-  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 1.1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.05fr) minmax(0, 1.15fr);
   gap: var(--space-4);
   flex: 1;
   min-height: 0;
@@ -1519,9 +1519,9 @@ select.process-field__input {
 
 /* ---- Finestres estretes ---- */
 
-@media (max-width: 1100px) {
+@media (max-width: 1400px) {
   .sim-columns {
-    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
   }
 
   .sim-col:last-child {
@@ -1529,7 +1529,17 @@ select.process-field__input {
   }
 
   #sim-panel {
-    height: 400px;
+    height: 380px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .sim-columns {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  }
+
+  #sim-panel {
+    height: 420px;
   }
 }
 
@@ -1546,6 +1556,220 @@ select.process-field__input {
   .sim-columns {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* =====================================================================
+   Capa visual de la simulació (sobre el diagrama)
+   ---------------------------------------------------------------------
+   Tot el que hi ha aquí és TEMPORAL: es dibuixa mentre el panell de
+   simulació és obert i desapareix sencer en tancar-lo, sense deixar cap
+   rastre a l'aspecte normal de l'editor. Viu en una capa pròpia amb
+   pointer-events: none, de manera que no pot interferir ni amb la
+   selecció ni amb l'arrossegament d'elements.
+   ===================================================================== */
+
+#sim-overlay {
+  pointer-events: none;
+}
+
+/* ---- Barres de nivell ---- */
+
+/* El contorn del "dipòsit": la caixa del dibuix de l'element. Molt fluix,
+   només per situar la barra. */
+.sim-bar__track {
+  fill: none;
+  stroke: var(--ui-primary);
+  stroke-opacity: 0.5;
+  stroke-width: 1;
+}
+
+/* El producte. Translúcid perquè el símbol es continuï llegint per sota. */
+/* Prou opac perquè el nivell es llegeixi d'una ullada des de l'altra punta
+   d'una sala de reunions, i prou transparent perquè el símbol es continuï
+   veient per sota. */
+.sim-bar__fill {
+  fill: var(--ui-primary);
+  fill-opacity: 0.32;
+  transition: fill-opacity var(--transition);
+}
+
+/* La ratlla del nivell: és la que es llegeix de lluny. */
+/* La ratlla del nivell és la que es llegeix de lluny: va del color fort. */
+.sim-bar__level {
+  stroke: var(--ui-primary-dark);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+/* Element buit: canvia de color i el contorn es fa discontinu, de manera
+   que es distingeix fins i tot en una captura en blanc i negre. */
+.sim-bar--empty .sim-bar__track {
+  stroke: var(--ui-danger);
+  stroke-opacity: 0.5;
+  stroke-dasharray: 4 3;
+}
+
+.sim-bar--empty .sim-bar__level {
+  stroke: var(--ui-danger);
+}
+
+/* Punt de consum per sobre de la seva capacitat: la barra es queda al
+   100 % i es pinta d'avís. */
+.sim-bar--over .sim-bar__fill {
+  fill: var(--ui-danger);
+  fill-opacity: 0.18;
+}
+
+.sim-bar--over .sim-bar__level,
+.sim-bar--over .sim-bar__track {
+  stroke: var(--ui-danger);
+  stroke-opacity: 1;
+}
+
+/* Etiquetes. Porten halo del color del fons (com el distintiu de rol)
+   perquè es llegeixin per sobre de la malla i de les canonades. */
+.sim-bar__kg,
+.sim-bar__pct {
+  font-family: var(--font);
+  text-anchor: middle;
+  stroke: var(--ui-canvas);
+  stroke-width: 3;
+  paint-order: stroke;
+}
+
+.sim-bar__kg {
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--ui-text);
+}
+
+.sim-bar__pct {
+  font-size: 10px;
+  fill: var(--ui-text-secondary);
+}
+
+.sim-bar--empty .sim-bar__kg,
+.sim-bar--over .sim-bar__kg {
+  fill: var(--ui-danger);
+}
+
+/* ---- Línia activa ---- */
+/* Classes pròpies, separades de les del ressaltat del panell de línies:
+   així les dues coses poden conviure i aturar la simulació no esborra el
+   ressaltat que l'usuari hagi fixat. */
+.pipe-path--active {
+  stroke: var(--ui-primary-dark);
+  stroke-width: 3.25;
+}
+
+.pid-element--active {
+  filter: drop-shadow(0 0 4px var(--ui-primary));
+}
+
+/* ---- Flux del producte ---- */
+.sim-flow__dot {
+  fill: var(--ui-primary-dark);
+  stroke: var(--ui-canvas);
+  stroke-width: 0.8;
+}
+
+/* ---- Informació en passar el ratolí ---- */
+.sim-tip {
+  position: fixed;
+  z-index: 1100;
+  max-width: 17rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--radius-md);
+  background: var(--ui-surface);
+  box-shadow: var(--shadow-popover);
+  color: var(--ui-text);
+  font-size: var(--size-small);
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+.sim-tip[hidden] {
+  display: none;
+}
+
+.sim-tip__title {
+  margin: 0 0 var(--space-1);
+  font-weight: 600;
+}
+
+.sim-tip__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.sim-tip__label {
+  color: var(--ui-text-muted);
+}
+
+.sim-tip__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-tip__value.is-warn {
+  color: var(--ui-danger);
+}
+
+/* ---- Resum ---- */
+.sim-summary {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--size-small);
+}
+
+.sim-summary__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.sim-summary__label {
+  color: var(--ui-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sim-summary__value {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-summary__row--total .sim-summary__label,
+.sim-summary__row--total .sim-summary__value {
+  color: var(--ui-text);
+  font-weight: 600;
+}
+
+.sim-summary__group {
+  margin: var(--space-2) 0 2px;
+  color: var(--ui-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.sim-summary__group:first-child {
+  margin-top: 0;
+}
+
+.sim-summary__incident {
+  color: var(--ui-danger);
+  line-height: 1.35;
+}
+
+.sim-summary__clean {
+  color: var(--ui-text-muted);
 }
 
 /* =====================================================================
