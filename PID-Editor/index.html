@@ -81,8 +81,38 @@
     <!-- El resultat del recàlcul s'anuncia sol als lectors de pantalla. -->
     <p id="lines-note" class="lines-panel__note" role="status" aria-live="polite" hidden></p>
     <ul id="lines-list" class="lines-panel__list"></ul>
+    <!-- Configuracions que ja no corresponen a cap línia detectada. No
+         s'esborren soles: si es desfà el canvi al diagrama, la línia torna
+         amb la seva configuració. Només es mostra quan n'hi ha. -->
+    <div id="orphan-lines" class="lines-panel__orphans" hidden>
+      <h3 class="lines-panel__subtitle">Configuracions sense línia</h3>
+      <ul id="orphan-list" class="lines-panel__list"></ul>
+    </div>
   </aside>
 
+  <!-- Panell de configuració de procés: mateix patró que el de línies de
+       transport (una targeta sobreposada al canvas), a l'altre costat de la
+       pantalla perquè els dos puguin ser oberts alhora. El formulari es
+       construeix a script.js a partir de l'esquema de ProcessModel, de
+       manera que afegir un camp no demana tocar aquest HTML. -->
+  <aside id="process-panel" aria-labelledby="process-panel-title" hidden>
+    <div class="lines-panel__head">
+      <h2 id="process-panel-title" class="lines-panel__title">Configuració</h2>
+      <button id="process-close" type="button" class="lines-panel__close" title="Tanca" aria-label="Tanca el panell">
+        <span aria-hidden="true">×</span>
+      </button>
+    </div>
+    <p id="process-subject" class="process-panel__subject"></p>
+    <form id="process-form" class="process-panel__form" novalidate></form>
+    <div id="process-source" class="process-panel__source" hidden></div>
+    <p id="process-note" class="lines-panel__note" role="status" aria-live="polite" hidden></p>
+    <div class="process-panel__actions">
+      <button id="process-save" type="submit" form="process-form" class="lines-panel__recalc">Desa</button>
+      <button id="process-cancel" type="button" class="process-panel__cancel">Cancel·la</button>
+    </div>
+  </aside>
+
+  <script src="process.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

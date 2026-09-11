@@ -539,6 +539,216 @@ body {
   line-height: 1.35;
 }
 
+/* Text de configuració de procés a cada entrada de la llista: el nom i els
+   paràmetres de la línia, o l'avís que encara no en té cap. */
+.line-item__setup {
+  margin-top: 0.2rem;
+  font-size: 0.74rem;
+  color: var(--text);
+}
+
+.line-item__setup--empty {
+  color: var(--text-muted-strong);
+  font-style: italic;
+}
+
+/* Encapçalament dels apartats secundaris dels panells. */
+.lines-panel__subtitle {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted-strong);
+}
+
+/* Configuracions que ja no corresponen a cap línia detectada. El contorn
+   discontinu les separa de les línies de debò sense cridar l'atenció: no
+   són cap error, només configuració que espera que la línia torni. */
+.lines-panel__orphans {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.lines-panel__orphans[hidden] {
+  display: none;
+}
+
+.orphan-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+
+.orphan-item__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.orphan-item__name {
+  font-size: 0.78rem;
+}
+
+.orphan-item__pair {
+  font-size: 0.72rem;
+  color: var(--text-muted-strong);
+}
+
+.orphan-item__remove {
+  flex: none;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel-alt);
+  color: var(--text-muted-strong);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.orphan-item__remove:hover {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/* ---- Panell de configuració de procés ---- */
+/* Mateixa targeta que el panell de línies de transport, a l'altre costat de
+   la pantalla perquè els dos puguin estar oberts alhora sense tapar-se. */
+#process-panel {
+  position: fixed;
+  /* Ancorat a baix i no centrat verticalment com el de línies: aquest
+     panell és més alt (hi caben quatre camps i el bloc d'origen) i centrat
+     arribaria a tapar la barra d'eines. */
+  bottom: 16px;
+  left: 16px;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 290px;
+  max-height: 62vh;
+  overflow-y: auto;
+  padding: 0.85rem;
+  background: var(--bg-panel-alt);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(61, 56, 48, 0.15);
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+#process-panel[hidden] {
+  display: none;
+}
+
+/* De qui és la fitxa que s'està editant (tipus d'element i distintiu). */
+.process-panel__subject {
+  margin: 0;
+  color: var(--text-muted-strong);
+  font-size: 0.76rem;
+}
+
+.process-panel__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.process-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+/* La unitat va dins de l'etiqueta, enganxada al nom del camp. */
+.process-field__label {
+  color: var(--text-muted-strong);
+  font-size: 0.72rem;
+}
+
+.process-field__input {
+  width: 100%;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.process-field__input:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 1px;
+}
+
+.process-field__input--invalid {
+  border-color: var(--warn);
+}
+
+/* Bloc d'origen del producte d'un punt de recollida: resultat de la
+   detecció, recorregut seguit, selector i botó de tornar a detectar. */
+.process-panel__source {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.process-panel__source[hidden] {
+  display: none;
+}
+
+.process-panel__state {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+/* Sense origen detectat o amb més d'un candidat: cal que es vegi que
+   demana una decisió, no que ja estigui resolt. */
+.process-panel__state--warn {
+  color: var(--accent-text);
+}
+
+.process-panel__route {
+  margin: 0;
+  color: var(--text-muted-strong);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.process-panel__actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.process-panel__cancel {
+  padding: 0.35rem 0.85rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-muted-strong);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.process-panel__cancel:hover {
+  border-color: var(--border);
+  color: var(--text);
+}
+
 /* Ressaltat temporal del recorregut d'una línia. Només afegeix estil per
    sobre del que ja hi ha (no substitueix res), de manera que treure la
    classe deixa l'element exactament com estava. */

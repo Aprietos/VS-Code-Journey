@@ -461,7 +461,7 @@ function buildBareElement(type) {
   addConnectionPoints(g, type);
   makeDraggable(g);
   makeConnectable(g);
-  makeRoleEditable(g);
+  makeElementEditable(g);
   return g;
 }
 
@@ -1127,6 +1127,11 @@ function removeElement(element) {
     return;
   }
 
+  // La fitxa de procés no es pot quedar oberta sobre un element que ja no
+  // hi és. La configuració SÍ que es queda al model: si es desfà
+  // l'eliminació, l'element torna amb tot el que tenia configurat.
+  closeProcessPanelFor(element.dataset.id);
+
   pipes
     .filter((pipe) => pipe.from.element === element || pipe.to.element === element)
     .forEach(removePipe);
@@ -1151,6 +1156,12 @@ function clearAll() {
   viewport.replaceChildren();
   elementCount = 0;
   clearSelection();
+  // El comptador d'identificadors torna a zero i, per tant, un element nou
+  // podria rebre l'identificador d'un dels que s'acaben d'esborrar. El
+  // model de procés va indexat per aquest identificador, així que s'ha de
+  // buidar alhora que el canvas per no heretar fitxes d'un model anterior.
+  ProcessModel.clear();
+  closeProcessPanel();
   pushHistory();
 }
 
@@ -1516,22 +1527,31 @@ canvas.addEventListener('mousedown', (event) => {
 // projecte ja identifica els punts de connexió (point.dataset.role).
 const ROLE_PICKUP = 'pickup';
 const ROLE_CONSUMPTION = 'consumption';
+const ROLE_STORAGE = 'storage';
 
-// Quin tipus d'element pot rebre cada rol. Com que un tipus només admet un
-// dels dos rols, el menú contextual no ha de fer triar mai entre rols.
+// Quins tipus d'element poden rebre cada rol. Un mateix tipus pot sortir a
+// més d'una llista (la tolva filtre pot ser punt de consum O element
+// d'emmagatzematge), però un element concret només pot tenir un rol alhora:
+// vegeu requestRoleChange, que avisa abans de substituir-ne un.
 const ROLE_TYPES = {
-  [ROLE_PICKUP]: 'injector',
-  [ROLE_CONSUMPTION]: 'hopper',
+  [ROLE_PICKUP]: ['injector'],
+  [ROLE_CONSUMPTION]: ['hopper'],
+  // El silo és l'element d'emmagatzematge dedicat que ja tenia el programa;
+  // la descàrrega de sacs fa de magatzem a tots els efectes, i la tolva
+  // filtre pot fer-ne quan no fa de punt de consum.
+  [ROLE_STORAGE]: ['silo', 'bagdump', 'hopper'],
 };
 
 const ROLE_LABELS = {
   [ROLE_PICKUP]: 'Pickup Point',
   [ROLE_CONSUMPTION]: 'Punt de consum',
+  [ROLE_STORAGE]: 'Element d\'emmagatzematge',
 };
 
 const ROLE_PREFIX = {
   [ROLE_PICKUP]: 'P',
   [ROLE_CONSUMPTION]: 'C',
+  [ROLE_STORAGE]: 'S',
 };
 
 function elementsWithRole(role) {
@@ -1566,25 +1586,70 @@ function clearElementRole(element) {
   pushHistory();
 }
 
+// Rols que admet un tipus d'element. Poden ser més d'un (vegeu ROLE_TYPES).
+function rolesForType(type) {
+  return Object.keys(ROLE_TYPES).filter((role) => ROLE_TYPES[role].includes(type));
+}
+
+// Un element no pot tenir dos rols alhora. Substituir-ne un canvia què és
+// l'element dins de la instal·lació i quina fitxa de procés se li demana,
+// així que no es fa en silenci: es demana confirmació primer.
+function requestRoleChange(element, role) {
+  const current = element.dataset.transportRole;
+
+  if (current && current !== role) {
+    const currentName = `${ROLE_LABELS[current]} ${element.dataset.transportRoleId}`;
+    const accepted = window.confirm(
+      `Aquest element ja és ${currentName}.\n\n`
+      + 'Un element només pot tenir un rol alhora: si el marques com a '
+      + `${ROLE_LABELS[role]}, deixarà de ser ${ROLE_LABELS[current]}.`,
+    );
+    if (!accepted) return;
+  }
+
+  assignElementRole(element, role);
+}
+
 // Entrades del menú contextual per als tipus que admeten rol (vegeu
 // buildElementMenuItems, que és qui les demana).
 function buildRoleMenuItems(element) {
-  const role = Object.keys(ROLE_TYPES).find((r) => ROLE_TYPES[r] === element.dataset.type);
-  if (!role) return [];
+  const roles = rolesForType(element.dataset.type);
+  if (!roles.length) return [];
 
-  if (element.dataset.transportRole) {
-    const current = `${ROLE_LABELS[role]} ${element.dataset.transportRoleId}`;
-    return [{ label: `Treure el rol (${current})`, action: () => clearElementRole(element) }];
+  const current = element.dataset.transportRole;
+  const items = [];
+
+  if (current) {
+    const name = `${ROLE_LABELS[current]} ${element.dataset.transportRoleId}`;
+    items.push({ label: `Treure el rol (${name})`, action: () => clearElementRole(element) });
   }
-  return [{ label: `Marcar com a ${ROLE_LABELS[role]}`, action: () => assignElementRole(element, role) }];
+
+  roles.filter((role) => role !== current).forEach((role) => {
+    items.push({
+      label: `Marcar com a ${ROLE_LABELS[role]}`,
+      action: () => requestRoleChange(element, role),
+    });
+  });
+
+  return items;
 }
 
-// Doble clic sobre un element que admet rol: obre les mateixes opcions al
-// mateix menú que ja fa servir el clic dret, sense afegir cap patró
-// d'interacció nou. El "dblclick" arriba després dels dos "click", que són
-// els que tanquen el menú, de manera que el que s'obre aquí no s'autotanca.
-function makeRoleEditable(element) {
+// Doble clic sobre un element:
+//   · si ja té un rol, obre la seva fitxa de procés (producte, quantitats,
+//     capacitat... segons el rol);
+//   · si no en té però en podria tenir, obre les opcions de rol al mateix
+//     menú que ja fa servir el clic dret, exactament com abans.
+// El "dblclick" arriba després dels dos "click", que són els que tanquen el
+// menú, de manera que el que s'obre aquí no s'autotanca.
+function makeElementEditable(element) {
   element.addEventListener('dblclick', (event) => {
+    if (element.dataset.transportRole) {
+      event.preventDefault();
+      event.stopPropagation();
+      openElementProcessPanel(element);
+      return;
+    }
+
     const items = buildRoleMenuItems(element);
     if (!items.length) return;
 
@@ -1965,16 +2030,28 @@ const linesClose = document.getElementById('lines-close');
 const linesRecalc = document.getElementById('lines-recalc');
 const linesList = document.getElementById('lines-list');
 const linesNote = document.getElementById('lines-note');
+const orphanLines = document.getElementById('orphan-lines');
+const orphanList = document.getElementById('orphan-list');
 
 // Línia fixada amb un clic: en treure el cursor d'una entrada es torna al
 // seu ressaltat en lloc d'apagar-ho tot. Es descarta a cada recàlcul.
 let pinnedLine = null;
 
+// Resultat de l'últim recàlcul. Es guarda a part perquè el panell es pugui
+// tornar a pintar sense refer la detecció: desar la configuració d'una
+// línia n'ha de canviar el text, però no quines línies hi ha ni en quin
+// ordre surten (això només ho decideix el recàlcul, que és explícit).
+let lastLinesResult = { lines: [], truncated: {}, blocked: [] };
+
 function renderTransportLines() {
   pinnedLine = null;
   clearTransportHighlight();
+  lastLinesResult = findTransportLines();
+  paintLinesPanel();
+}
 
-  const { lines, truncated, blocked } = findTransportLines();
+function paintLinesPanel() {
+  const { lines, truncated, blocked } = lastLinesResult;
   const notes = [];
   markBlockedElements(blocked);
 
@@ -2039,7 +2116,36 @@ function renderTransportLines() {
     const count = line.pathConnectorIds.length;
     detail.textContent = `${line.pathLabels.join(' › ')} · ${count === 1 ? '1 canonada' : `${count} canonades`}`;
 
-    control.append(title, detail);
+    // Tercera fila: la configuració de procés de la línia, o l'avís que
+    // encara no en té. La signatura (i no el número de línia, que canvia)
+    // és el que lliga la línia detectada amb la seva configuració.
+    const signature = ProcessModel.lineSignature(line);
+    const setup = document.createElement('span');
+    setup.className = 'line-item__setup';
+
+    if (ProcessModel.hasLine(signature)) {
+      const config = ProcessModel.getLine(signature);
+      setup.textContent = [
+        config.name || 'Sense nom',
+        `${config.throughput} kg/h`,
+        `Ø ${config.diameter} mm`,
+        `${config.length} m`,
+      ].join(' · ');
+    } else {
+      setup.classList.add('line-item__setup--empty');
+      setup.textContent = 'Sense configurar';
+    }
+
+    control.append(title, detail, setup);
+    control.title = 'Doble clic per configurar la línia';
+
+    // Doble clic per obrir la fitxa. Els dos "click" que l'acompanyen fan
+    // i desfan la fixació del ressaltat, de manera que l'estat final és el
+    // mateix que hi havia abans i no cal tractar-los a part.
+    control.addEventListener('dblclick', (event) => {
+      event.preventDefault();
+      openLineProcessPanel(line);
+    });
 
     // El ressaltat respon tant al ratolí com al focus del teclat, perquè
     // qui navega amb el tabulador vegi el recorregut igual que qui hi passa
@@ -2064,8 +2170,63 @@ function renderTransportLines() {
       highlightTransportLine(pinnedLine || line);
     });
 
+    // En repintar (per exemple, després de desar una configuració) la línia
+    // que estava fixada ho ha de continuar estant: els objectes `line` són
+    // els mateixos mentre no hi hagi un recàlcul nou.
+    if (pinnedLine === line) {
+      control.classList.add('is-pinned');
+      control.setAttribute('aria-pressed', 'true');
+    }
+
     item.appendChild(control);
     linesList.appendChild(item);
+  });
+
+  paintOrphanLines(lines.map((line) => ProcessModel.lineSignature(line)));
+}
+
+// Configuracions de línia que ara mateix no corresponen a cap línia
+// detectada. No s'esborren mai soles: si la línia torna (perquè es desfà un
+// canvi al diagrama o es torna a fer la connexió), la configuració hi torna
+// amb ella. Eliminar-les és sempre una acció explícita d'aquesta llista.
+function paintOrphanLines(activeSignatures) {
+  const orphans = ProcessModel.orphanLines(activeSignatures);
+  orphanLines.hidden = orphans.length === 0;
+  orphanList.replaceChildren();
+
+  orphans.forEach((signature) => {
+    const config = ProcessModel.getLine(signature);
+    const [pickupId, consumptionId] = signature.split('|');
+
+    const item = document.createElement('li');
+    item.className = 'orphan-item';
+
+    const text = document.createElement('span');
+    text.className = 'orphan-item__text';
+
+    const name = document.createElement('span');
+    name.className = 'orphan-item__name';
+    name.textContent = `${config.name || 'Sense nom'} · ${config.throughput} kg/h`;
+
+    const pair = document.createElement('span');
+    pair.className = 'orphan-item__pair';
+    pair.textContent = `${processElementName(pickupId)} → ${processElementName(consumptionId)}`;
+
+    text.append(name, pair);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'orphan-item__remove';
+    remove.textContent = 'Elimina';
+    remove.title = 'Elimina aquesta configuració definitivament';
+    remove.addEventListener('click', () => {
+      ProcessModel.deleteLine(signature);
+      paintLinesPanel();
+      pushHistory();
+    });
+
+    item.append(text, remove);
+    orphanList.appendChild(item);
   });
 }
 
@@ -2097,6 +2258,323 @@ linesClose.addEventListener('click', () => {
 });
 
 linesRecalc.addEventListener('click', renderTransportLines);
+
+// ---- Panell de configuració de procés ----
+// Un únic panell per a les quatre fitxes (element d'emmagatzematge, punt de
+// consum, punt de recollida i línia de transport). El formulari es
+// construeix a partir de l'esquema que declara ProcessModel, de manera que
+// afegir o treure un camp és tocar aquella llista i res més. Visualment és
+// la mateixa targeta que el panell de línies de transport, a l'altre costat
+// de la pantalla perquè els dos puguin conviure oberts.
+const processPanel = document.getElementById('process-panel');
+const processTitle = document.getElementById('process-panel-title');
+const processSubject = document.getElementById('process-subject');
+const processForm = document.getElementById('process-form');
+const processSource = document.getElementById('process-source');
+const processNote = document.getElementById('process-note');
+const processCancel = document.getElementById('process-cancel');
+const processClose = document.getElementById('process-close');
+
+// Què s'està editant ara mateix: l'esquema, els valors de partida i què fer
+// en desar. El panell no guarda cap referència a l'element o a la línia,
+// només l'identificador que li calgui, de manera que no pot quedar-se
+// apuntant a res que ja no existeixi.
+let processEditor = null;
+
+function setProcessNote(message, isError = false) {
+  processNote.textContent = message;
+  processNote.hidden = !message;
+  processNote.classList.toggle('toolbar-note--error', Boolean(isError));
+}
+
+function closeProcessPanel() {
+  processPanel.hidden = true;
+  processEditor = null;
+  processForm.replaceChildren();
+  processSource.replaceChildren();
+  processSource.hidden = true;
+  setProcessNote('');
+}
+
+// Tanca el panell només si el que s'hi està editant és aquest element (es
+// fa servir en eliminar-lo).
+function closeProcessPanelFor(elementId) {
+  if (processEditor && processEditor.elementId === elementId) closeProcessPanel();
+}
+
+// Nom amb què es presenta un element: el que li hagi posat l'usuari a la
+// fitxa i, si encara no en té cap, el nom del tipus amb el distintiu del
+// rol ("Silo S1").
+function elementDisplayName(element) {
+  const role = element.dataset.transportRole;
+  const stored = role ? ProcessModel.getElement(element.dataset.id, role) : null;
+  if (stored && stored.name) return stored.name;
+
+  const badge = role ? ` ${ROLE_PREFIX[role]}${element.dataset.transportRoleId}` : '';
+  return `${typeLabel(element.dataset.type)}${badge}`;
+}
+
+function processElementName(elementId) {
+  const element = viewport.querySelector(`.pid-element[data-id="${elementId}"]`);
+  return element ? elementDisplayName(element) : elementId;
+}
+
+// Topologia en format pla per al model de procés, que no sap llegir el
+// canvas. És l'única passarel·la entre la capa de dibuix i la de dades.
+function buildProcessGraph() {
+  const graph = {};
+
+  buildTopology().forEach((node, id) => {
+    const ports = {};
+    node.ports.forEach((link, port) => {
+      ports[port] = { otherId: link.otherId, otherPort: link.otherPort };
+    });
+
+    graph[id] = {
+      type: node.element.dataset.type,
+      role: node.element.dataset.transportRole || '',
+      ports,
+    };
+  });
+
+  return graph;
+}
+
+// Camps del formulari a partir de l'esquema. La unitat va sempre enganxada
+// a l'etiqueta perquè no es pugui llegir un número sense saber de què és.
+// Els números van en camps de text i no en <input type="number"> perquè
+// aquí s'escriu amb coma decimal; de validar-ho ja se n'ocupa ProcessModel.
+function buildProcessFields(kind, values) {
+  processForm.replaceChildren();
+
+  ProcessModel.schemaFor(kind).forEach((field) => {
+    const row = document.createElement('label');
+    row.className = 'process-field';
+
+    const caption = document.createElement('span');
+    caption.className = 'process-field__label';
+    caption.textContent = field.unit ? `${field.label} (${field.unit})` : field.label;
+
+    const input = document.createElement('input');
+    input.className = 'process-field__input';
+    input.type = 'text';
+    input.name = field.key;
+    input.autocomplete = 'off';
+    input.value = String(values[field.key]);
+    if (field.type === 'number') input.inputMode = 'decimal';
+
+    row.append(caption, input);
+    processForm.appendChild(row);
+  });
+}
+
+// Tot el que hi ha al formulari, inclosos els controls que viuen fora del
+// <form> però hi estan associats amb l'atribut form (el selector d'origen
+// del punt de recollida).
+function readProcessForm() {
+  const values = {};
+  [...processForm.elements].forEach((control) => {
+    if (control.name) values[control.name] = control.value;
+  });
+  return values;
+}
+
+function markInvalidFields(errors) {
+  [...processForm.elements].forEach((control) => {
+    if (control.name) {
+      control.classList.toggle('process-field__input--invalid', Boolean(errors[control.name]));
+    }
+  });
+}
+
+function openProcessPanel(editor) {
+  closeProcessPanel();
+  processEditor = editor;
+
+  processTitle.textContent = editor.title;
+  processSubject.textContent = editor.subject;
+  buildProcessFields(editor.kind, editor.values);
+  if (editor.renderExtra) editor.renderExtra();
+
+  processPanel.hidden = false;
+  const first = processForm.querySelector('input');
+  if (first) first.focus();
+}
+
+processForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!processEditor) return;
+
+  const raw = readProcessForm();
+  const result = ProcessModel.validate(processEditor.kind, raw);
+  markInvalidFields(result.errors);
+
+  if (!result.ok) {
+    const field = ProcessModel.schemaFor(processEditor.kind).find((f) => result.errors[f.key]);
+    setProcessNote(`${field.label}: ${result.errors[field.key]}`, true);
+    return;
+  }
+
+  processEditor.onSave(result.values, raw);
+  closeProcessPanel();
+  // Configurar és una acció més de l'usuari: entra a l'historial i, per
+  // tant, es pot desfer igual que moure o connectar.
+  pushHistory();
+});
+
+processCancel.addEventListener('click', closeProcessPanel);
+processClose.addEventListener('click', closeProcessPanel);
+
+// ---- Origen del producte d'un punt de recollida ----
+// Es torna a calcular en obrir la fitxa i en prémer "Tornar a detectar", mai
+// de forma contínua. El selector viu aquí dins (i no entre els camps
+// normals) perquè va acompanyat del resultat de la detecció, però està
+// associat al formulari amb l'atribut form, de manera que es desa i es
+// cancel·la amb la resta de la fitxa.
+function refreshPickupSource(element) {
+  const elementId = element.dataset.id;
+  const current = processSource.querySelector('select[name="storageChoice"]');
+  const override = current ? current.value : undefined;
+
+  const source = ProcessModel.resolvePickupSource(
+    buildProcessGraph(), elementId, canCrossElement, override,
+  );
+
+  processSource.replaceChildren();
+  processSource.hidden = false;
+
+  const title = document.createElement('h3');
+  title.className = 'lines-panel__subtitle';
+  title.textContent = 'Origen del producte';
+  processSource.appendChild(title);
+
+  const state = document.createElement('p');
+  state.className = 'process-panel__state';
+
+  if (source.status === 'none') {
+    state.classList.add('process-panel__state--warn');
+    state.textContent = 'Sense origen detectat: no hi ha cap element d\'emmagatzematge '
+      + 'connectat amb aquest punt de recollida.';
+  } else if (source.status === 'ambiguous') {
+    state.classList.add('process-panel__state--warn');
+    state.textContent = `Hi ha ${source.candidates.length} elements d'emmagatzematge a la `
+      + 'mateixa distància. Tria quin alimenta aquest punt de recollida.';
+  } else {
+    const storage = ProcessModel.getElement(source.storageId, ROLE_STORAGE);
+    state.textContent = [
+      processElementName(source.storageId),
+      `Producte: ${storage.product || 'sense definir'}`,
+      `Quantitat: ${ProcessModel.formatKg(storage.quantity)} kg`,
+    ].join(' · ');
+  }
+
+  processSource.appendChild(state);
+
+  if (source.status === 'chosen') {
+    const chosen = document.createElement('p');
+    chosen.className = 'process-panel__route';
+    chosen.textContent = source.stale
+      ? 'Elecció manual. Ara mateix aquest element no surt entre els detectats automàticament.'
+      : 'Elecció manual.';
+    processSource.appendChild(chosen);
+  }
+
+  if (source.path && source.path.length > 1) {
+    const route = document.createElement('p');
+    route.className = 'process-panel__route';
+    route.textContent = source.path.map(processElementName).join(' › ');
+    processSource.appendChild(route);
+  }
+
+  // El selector només té sentit si hi ha alguna cosa a triar: candidats
+  // detectats o una elecció manual que es pugui desfer.
+  const options = source.candidates.map((candidate) => candidate.id);
+  if (source.storageId && !options.includes(source.storageId)) options.push(source.storageId);
+
+  if (options.length) {
+    const row = document.createElement('label');
+    row.className = 'process-field';
+
+    const caption = document.createElement('span');
+    caption.className = 'process-field__label';
+    caption.textContent = 'Element d\'emmagatzematge';
+
+    const select = document.createElement('select');
+    select.className = 'process-field__input';
+    select.name = 'storageChoice';
+    // Viu fora del <form>, però n'és part a tots els efectes.
+    select.setAttribute('form', 'process-form');
+
+    const auto = document.createElement('option');
+    auto.value = '';
+    auto.textContent = 'Detecció automàtica';
+    select.appendChild(auto);
+
+    options.forEach((storageId) => {
+      const option = document.createElement('option');
+      option.value = storageId;
+      option.textContent = processElementName(storageId);
+      select.appendChild(option);
+    });
+
+    select.value = override === undefined ? ProcessModel.getPickupChoice(elementId) : override;
+    select.addEventListener('change', () => refreshPickupSource(element));
+
+    row.append(caption, select);
+    processSource.appendChild(row);
+  }
+
+  const redetect = document.createElement('button');
+  redetect.type = 'button';
+  redetect.className = 'lines-panel__recalc';
+  redetect.textContent = 'Tornar a detectar';
+  redetect.addEventListener('click', () => refreshPickupSource(element));
+  processSource.appendChild(redetect);
+}
+
+// ---- Obertura de cada fitxa ----
+function openElementProcessPanel(element) {
+  const role = element.dataset.transportRole;
+  if (!role) return;
+
+  const elementId = element.dataset.id;
+
+  const editor = {
+    kind: role,
+    elementId,
+    title: ROLE_LABELS[role],
+    subject: `${typeLabel(element.dataset.type)} · ${ROLE_PREFIX[role]}${element.dataset.transportRoleId}`,
+    values: ProcessModel.getElement(elementId, role),
+    onSave: (values, raw) => {
+      ProcessModel.setElement(elementId, role, values);
+      // L'elecció d'origen no és un camp de l'esquema sinó una decisió que
+      // mana sobre un càlcul, però es desa amb la resta de la fitxa.
+      if (role === ROLE_PICKUP) ProcessModel.setPickupChoice(elementId, raw.storageChoice || '');
+      if (!linesPanel.hidden) paintLinesPanel();
+    },
+  };
+
+  if (role === ROLE_PICKUP) editor.renderExtra = () => refreshPickupSource(element);
+
+  openProcessPanel(editor);
+}
+
+function openLineProcessPanel(line) {
+  const signature = ProcessModel.lineSignature(line);
+  const pair = `${ROLE_LABELS[ROLE_PICKUP]} ${line.pickupNumber} `
+    + `→ ${ROLE_LABELS[ROLE_CONSUMPTION]} ${line.consumptionNumber}`;
+
+  openProcessPanel({
+    kind: 'line',
+    title: 'Línia de transport',
+    subject: `Línia ${line.number} · ${pair}`,
+    values: ProcessModel.getLine(signature),
+    onSave: (values) => {
+      ProcessModel.setLine(signature, values);
+      paintLinesPanel();
+    },
+  });
+}
 
 // ---- Desfer / Refer ----
 // Pila de captures completes de l'estat (tots els elements i canonades),
@@ -2136,7 +2614,9 @@ function serializeState() {
     freeValues: [...pipe.freeValues],
   }));
 
-  return { elements, pipes: pipesData, elementCount };
+  // El model de procés forma part de l'estat a tots els efectes: així
+  // desfer/refer i els arxius .pid.json el porten sense cap codi a part.
+  return { elements, pipes: pipesData, elementCount, process: ProcessModel.serialize() };
 }
 
 // Accepta tant el format actual ({ x, y, data }) com el que feien servir
@@ -2172,6 +2652,10 @@ function restoreState(state) {
   pipes.length = 0;
   viewport.replaceChildren();
   clearSelection();
+  // Un arxiu d'abans d'aquesta etapa no porta model de procés: load() el
+  // deixa buit, que és exactament el que toca.
+  ProcessModel.load(state.process);
+  closeProcessPanel();
 
   const byId = new Map();
   let maxIdNumber = 0;
