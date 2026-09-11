@@ -50,8 +50,15 @@ const ProcessModel = (() => {
     [ROLE_PICKUP]: [
       { key: 'name', type: 'text', label: 'Nom', value: '' },
     ],
-    line: [
+    // La bomba bufadora no té rol: no recull, no consumeix i no
+    // emmagatzema. Només li cal un nom, i per això té fitxa pròpia.
+    pump: [
       { key: 'name', type: 'text', label: 'Nom', value: '' },
+    ],
+    // La línia NO té nom: ja té número, i el que interessa saber-ne és
+    // quines bombes la poden fer funcionar, que és informació DERIVADA de
+    // la topologia i per tant no es desa (vegeu detectPumps a script.js).
+    line: [
       { key: 'throughput', type: 'number', label: 'Rendiment', unit: 'kg/h', value: 0, positive: true },
       { key: 'diameter', type: 'number', label: 'Diàmetre', unit: 'mm', value: 0 },
       { key: 'length', type: 'number', label: 'Longitud', unit: 'm', value: 0 },

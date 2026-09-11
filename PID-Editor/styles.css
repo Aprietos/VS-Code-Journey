@@ -592,6 +592,27 @@ body {
   pointer-events: none;
 }
 
+/* Distintiu d'una bomba bufadora: el seu nom i si treballa per impulsió o
+   per aspiració. Mateixa família que el distintiu de rol, amb halo del
+   color del fons perquè es llegeixi sobre la malla. */
+.pump-badge {
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 600;
+  fill: var(--ui-primary-dark);
+  stroke: var(--ui-canvas);
+  stroke-width: 3;
+  paint-order: stroke;
+  pointer-events: none;
+}
+
+/* Bomba que encara no està connectada de cap de les dues maneres que el
+   programa entén: no fa funcionar res, i es veu. */
+.pump-badge--unknown {
+  fill: var(--ui-text-muted);
+  font-weight: 500;
+}
+
 /* Ressaltat temporal del recorregut d'una línia. Només afegeix estil per
    sobre del que ja hi ha (no substitueix res), de manera que treure la
    classe deixa l'element exactament com estava. */
@@ -852,6 +873,19 @@ body {
 
 .line-item__pair {
   color: var(--ui-text);
+}
+
+/* Bombes que poden fer funcionar la línia. Ocupen el lloc que abans tenia
+   el nom, i són el primer que es llegeix després del parell de rols. */
+.line-item__pumps {
+  margin-top: 2px;
+  color: var(--ui-primary-dark);
+  font-size: var(--size-small);
+}
+
+.line-item__pumps--none {
+  color: var(--ui-danger);
+  font-style: italic;
 }
 
 .line-item__path {

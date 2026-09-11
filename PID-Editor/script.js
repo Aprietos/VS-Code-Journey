@@ -500,6 +500,12 @@ function createElementInstance(type) {
   g.dataset.rotation = '0';
   g.dataset.flipped = DEFAULT_FLIPPED_TYPES.has(type) ? '1' : '0';
   g.dataset.scale = '1';
+
+  // El nom d'una bomba es veu al diagrama i al panell de línies abans que
+  // ningú n'obri la fitxa, així que se li posa el primer "Bomba N" lliure
+  // ja en néixer. A partir d'aquí és seu: ningú no l'hi torna a canviar.
+  if (type === PUMP_TYPE) ProcessModel.setElement(g.dataset.id, PUMP_TYPE, { name: defaultPumpName(g) });
+
   return g;
 }
 
@@ -552,8 +558,10 @@ function setElementPosition(element, x, y) {
 
   element.setAttribute('transform', parts.join(' '));
 
-  const badge = element.querySelector('.role-badge');
-  if (badge) badge.setAttribute('transform', undo.join(' '));
+  // El distintiu del rol i el de la bomba porten les transformacions
+  // desfetes perquè el text no giri ni s'inverteixi amb la forma.
+  element.querySelectorAll('.role-badge, .pump-badge')
+    .forEach((badge) => badge.setAttribute('transform', undo.join(' ')));
 }
 
 // Torna a aplicar el transform d'un element mantenint la posició actual
@@ -1763,6 +1771,14 @@ function makeElementEditable(element) {
       return;
     }
 
+    // La bomba no té rol, però sí nom.
+    if (element.dataset.type === PUMP_TYPE) {
+      event.preventDefault();
+      event.stopPropagation();
+      openPumpProcessPanel(element);
+      return;
+    }
+
     const items = buildRoleMenuItems(element);
     if (!items.length) return;
 
@@ -1805,6 +1821,37 @@ function updateRoleBadge(element) {
   badge.textContent = `${ROLE_PREFIX[role]}${element.dataset.transportRoleId}`;
   tip.textContent = `${ROLE_LABELS[role]} ${element.dataset.transportRoleId}`;
   reapplyElementTransform(element);
+}
+
+// Distintiu d'una bomba: el seu nom i, un cop detectat com està
+// connectada, si treballa per impulsió o per aspiració. Va dins del mateix
+// <g> que la forma, com el distintiu de rol, de manera que la segueix sense
+// cap manteniment (moure, copiar, esborrar, desfer).
+function updatePumpBadge(element, info) {
+  if (element.dataset.type !== PUMP_TYPE) return;
+
+  let badge = element.querySelector('.pump-badge');
+  if (!badge) {
+    badge = document.createElementNS(svgNS, 'text');
+    badge.classList.add('pump-badge');
+    badge.setAttribute('x', -4);
+    badge.setAttribute('y', -10);
+    element.appendChild(badge);
+  }
+
+  const mode = info && info.mode ? PUMP_MODE_LABELS[info.mode] : '';
+  badge.textContent = mode
+    ? `${pumpName(element.dataset.id)} · ${mode}`
+    : pumpName(element.dataset.id);
+  badge.classList.toggle('pump-badge--unknown', !mode);
+  reapplyElementTransform(element);
+}
+
+// Refà els distintius de totes les bombes. Es crida quan es recalculen les
+// línies i quan es reconstrueix el canvas sencer.
+function refreshPumpBadges() {
+  const pumps = detectPumps(buildTopology());
+  pumpElements().forEach((element) => updatePumpBadge(element, pumps[element.dataset.id]));
 }
 
 // ---- Rutes de transport (derivades de la topologia) ----
@@ -1923,6 +1970,137 @@ function findBlockedElements(nodes) {
   });
 
   return blocked;
+}
+
+// ---- Bombes bufadores ----
+// La bomba és el que fa moure el producte per una línia. El seu tipus NO el
+// tria l'usuari: es dedueix de com està connectada al diagrama.
+//
+//   · Connectada al connector de DARRERE d'un injector que és punt de
+//     recollida (el port `input`, per on li entra l'aire) → IMPULSIÓ.
+//   · Connectada al connector SUPERIOR d'una tolva filtre (el port
+//     `output2`, el de dalt de tot) → ASPIRACIÓ.
+//
+// Qualsevol altra manera de connectar-la la deixa sense tipus: la bomba hi
+// és, però el programa no sap què ha de moure, i ho diu.
+//
+// Tot això és informació DERIVADA de la topologia, com les línies: es torna
+// a calcular i no es desa mai. L'únic que es desa d'una bomba és el nom.
+const PUMP_TYPE = 'pump';
+const PUMP_PUSH_PORT = 'input';      // darrere de l'injector
+const PUMP_SUCTION_PORT = 'output2'; // dalt de la tolva filtre
+
+const PUMP_MODE_LABELS = {
+  push: 'impulsió',
+  suction: 'aspiració',
+};
+
+function pumpElements() {
+  return [...viewport.querySelectorAll(`.pid-element[data-type="${PUMP_TYPE}"]`)];
+}
+
+// Nom d'una bomba: el que li hagi posat l'usuari o, si encara no en té cap,
+// el primer "Bomba N" lliure. Es calcula recorrent les que hi ha ara, sense
+// cap comptador global, de manera que desfer/refer no el pot desincronitzar.
+function defaultPumpName(element) {
+  const used = new Set();
+
+  pumpElements().forEach((pump) => {
+    if (pump === element) return;
+    const match = /^Bomba (\d+)$/.exec(ProcessModel.getElement(pump.dataset.id, PUMP_TYPE).name || '');
+    if (match) used.add(Number(match[1]));
+  });
+
+  let number = 1;
+  while (used.has(number)) number += 1;
+  return `Bomba ${number}`;
+}
+
+function pumpName(elementId) {
+  const stored = ProcessModel.getElement(elementId, PUMP_TYPE).name;
+  if (stored) return stored;
+
+  // Bombes que venen d'un model anterior a aquesta funcionalitat: se'ls
+  // dona un nom per la posició, que és estable mentre no se'n tregui cap.
+  const index = pumpElements().findIndex((element) => element.dataset.id === elementId);
+  return `Bomba ${index >= 0 ? index + 1 : 1}`;
+}
+
+// Com està connectada cada bomba. `nodes` és la topologia de buildTopology().
+// Retorna { id -> { id, name, mode, targetId } }, on mode és 'push',
+// 'suction' o '' (connectada en algun lloc que no fa cap de les dues coses).
+function detectPumps(nodes) {
+  const pumps = {};
+
+  pumpElements().forEach((element) => {
+    const id = element.dataset.id;
+    const info = { id, name: pumpName(id), mode: '', targetId: '' };
+    pumps[id] = info;
+
+    const node = nodes.get(id);
+    if (!node) return;
+
+    node.ports.forEach((link) => {
+      if (info.mode) return;
+
+      const other = nodes.get(link.otherId);
+      if (!other) return;
+
+      const type = other.element.dataset.type;
+      const role = other.element.dataset.transportRole || '';
+
+      if (type === 'injector' && link.otherPort === PUMP_PUSH_PORT && role === ROLE_PICKUP) {
+        info.mode = 'push';
+        info.targetId = link.otherId;
+      } else if (type === 'hopper' && link.otherPort === PUMP_SUCTION_PORT) {
+        info.mode = 'suction';
+        info.targetId = link.otherId;
+      }
+    });
+  });
+
+  return pumps;
+}
+
+// Quines bombes poden fer funcionar cada línia.
+//
+//   · Aspiració: totes les línies que acaben al punt de consum d'aquella
+//     tolva filtre.
+//   · Impulsió: les línies que surten del seu punt de recollida i, a més,
+//     les que surten d'un punt de recollida que es trobi MÉS ENDAVANT dins
+//     del recorregut d'alguna línia que surti del primer. És el cas dels
+//     injectors en sèrie: la bomba de davant també els empeny.
+function assignPumpsToLines(lines, pumps) {
+  // Punts de recollida que queden aigües avall de cada punt de recollida,
+  // llegits del recorregut que ja porta cada línia.
+  const downstream = new Map();
+
+  lines.forEach((line) => {
+    if (!downstream.has(line.pickupPointId)) downstream.set(line.pickupPointId, new Set());
+    const reach = downstream.get(line.pickupPointId);
+    // El primer element del recorregut és el mateix punt de recollida.
+    line.pathElementIds.slice(1).forEach((id) => reach.add(id));
+  });
+
+  lines.forEach((line) => {
+    // Ordenades pel nom, que és com es llegeixen a la pantalla.
+    line.pumpIds = Object.keys(pumps).filter((id) => {
+      const pump = pumps[id];
+      if (pump.mode === 'suction') return pump.targetId === line.consumptionPointId;
+      if (pump.mode !== 'push') return false;
+
+      if (pump.targetId === line.pickupPointId) return true;
+      const reach = downstream.get(pump.targetId);
+      return Boolean(reach && reach.has(line.pickupPointId));
+    }).sort((a, b) => pumps[a].name.localeCompare(pumps[b].name, 'ca'));
+
+    line.pumpNames = line.pumpIds.map((id) => pumps[id].name);
+  });
+}
+
+// Text de les bombes d'una línia, per ensenyar-lo a la pantalla.
+function pumpListLabel(names) {
+  return names && names.length ? names.join(', ') : 'sense bomba';
 }
 
 // Les canonades no tenen identificador propi, però cada punt de connexió
@@ -2118,6 +2296,8 @@ function findTransportLines() {
     line.routeCount = routesPerPair.get(pair);
   });
 
+  assignPumpsToLines(lines, detectPumps(nodes));
+
   return { lines, truncated, blocked };
 }
 
@@ -2186,6 +2366,7 @@ function renderTransportLines() {
   pinnedLine = null;
   clearTransportHighlight();
   lastLinesResult = findTransportLines();
+  refreshPumpBadges();
   paintLinesPanel();
 }
 
@@ -2255,7 +2436,17 @@ function paintLinesPanel() {
     const count = line.pathConnectorIds.length;
     detail.textContent = `${line.pathLabels.join(' › ')} · ${count === 1 ? '1 canonada' : `${count} canonades`}`;
 
-    // Tercera fila: la configuració de procés de la línia, o l'avís que
+    // Segona fila: les bombes que poden fer funcionar aquesta línia. Ocupen
+    // el lloc que abans tenia el nom, que no deia res que el número no
+    // digués ja.
+    const pumps = document.createElement('span');
+    pumps.className = 'line-item__pumps';
+    pumps.textContent = pumpListLabel(line.pumpNames);
+    if (!line.pumpNames || !line.pumpNames.length) {
+      pumps.classList.add('line-item__pumps--none');
+    }
+
+    // Última fila: la configuració de procés de la línia, o l'avís que
     // encara no en té. La signatura (i no el número de línia, que canvia)
     // és el que lliga la línia detectada amb la seva configuració.
     const signature = ProcessModel.lineSignature(line);
@@ -2265,7 +2456,6 @@ function paintLinesPanel() {
     if (ProcessModel.hasLine(signature)) {
       const config = ProcessModel.getLine(signature);
       setup.textContent = [
-        config.name || 'Sense nom',
         `${config.throughput} kg/h`,
         `Ø ${config.diameter} mm`,
         `${config.length} m`,
@@ -2275,7 +2465,7 @@ function paintLinesPanel() {
       setup.textContent = 'Sense configurar';
     }
 
-    control.append(title, detail, setup);
+    control.append(title, pumps, detail, setup);
     control.title = 'Doble clic per configurar la línia';
 
     // Doble clic per obrir la fitxa. Els dos "click" que l'acompanyen fan
@@ -2345,7 +2535,7 @@ function paintOrphanLines(activeSignatures) {
 
     const name = document.createElement('span');
     name.className = 'orphan-item__name';
-    name.textContent = `${config.name || 'Sense nom'} · ${config.throughput} kg/h`;
+    name.textContent = `${config.throughput} kg/h · Ø ${config.diameter} mm`;
 
     const pair = document.createElement('span');
     pair.className = 'orphan-item__pair';
@@ -2711,30 +2901,105 @@ function openElementProcessPanel(element) {
   openProcessPanel(editor);
 }
 
+// Bombes que poden fer funcionar aquesta línia. Va al bloc de només
+// lectura del panell, com l'origen del producte d'un punt de recollida: no
+// és una cosa que s'editi, és el resultat de com està muntat el diagrama.
+function renderLinePumps(line) {
+  processSource.replaceChildren();
+  processSource.hidden = false;
+
+  const title = document.createElement('h3');
+  title.className = 'lines-panel__subtitle';
+  title.textContent = 'Bombes que la poden fer funcionar';
+  processSource.appendChild(title);
+
+  const state = document.createElement('p');
+  state.className = 'process-panel__state';
+
+  if (line.pumpNames && line.pumpNames.length) {
+    state.textContent = line.pumpNames.join(', ');
+  } else {
+    state.classList.add('process-panel__state--warn');
+    state.textContent = 'Cap. Connecta una bomba al darrere del punt de recollida '
+      + 'o a la part de dalt de la tolva filtre de destí.';
+  }
+
+  processSource.appendChild(state);
+}
+
 function openLineProcessPanel(line) {
   const signature = ProcessModel.lineSignature(line);
   const pair = `${ROLE_LABELS[ROLE_PICKUP]} ${line.pickupNumber} `
     + `→ ${ROLE_LABELS[ROLE_CONSUMPTION]} ${line.consumptionNumber}`;
 
-  const values = ProcessModel.getLine(signature);
-
-  // Nom per defecte, amb el número que la línia té ARA al panell. S'ofereix
-  // NOMÉS mentre la línia no s'ha configurat mai: un cop desada, el nom és
-  // de l'usuari i no es torna a tocar. Per això no es pot renomenar sola
-  // quan un recàlcul canvia els números: el nom ja no és el per defecte,
-  // és el que hi ha desat.
-  if (!ProcessModel.hasLine(signature)) values.name = `Línia ${line.number}`;
-
   openProcessPanel({
     kind: 'line',
     title: 'Línia de transport',
     subject: `Línia ${line.number} · ${pair}`,
-    values,
+    values: ProcessModel.getLine(signature),
+    renderExtra: () => renderLinePumps(line),
     onSave: (values) => {
       ProcessModel.setLine(signature, values);
       paintLinesPanel();
     },
   });
+}
+
+// Fitxa d'una bomba: només el nom. El tipus (impulsió o aspiració) no s'hi
+// tria, es dedueix de com està connectada i es mostra com a informació.
+function openPumpProcessPanel(element) {
+  const elementId = element.dataset.id;
+  const values = ProcessModel.getElement(elementId, PUMP_TYPE);
+  if (!ProcessModel.hasElement(elementId)) values.name = defaultPumpName(element);
+
+  const info = detectPumps(buildTopology())[elementId];
+  const mode = info && info.mode ? PUMP_MODE_LABELS[info.mode] : '';
+
+  openProcessPanel({
+    kind: PUMP_TYPE,
+    elementId,
+    title: 'Bomba bufadora',
+    subject: mode
+      ? `${typeLabel(PUMP_TYPE)} · treballa per ${mode}`
+      : `${typeLabel(PUMP_TYPE)} · encara no connectada`,
+    values,
+    renderExtra: () => renderPumpConnection(info),
+    onSave: (clean) => {
+      ProcessModel.setElement(elementId, PUMP_TYPE, clean);
+      updatePumpBadge(element, info);
+      if (!linesPanel.hidden) renderTransportLines();
+    },
+  });
+}
+
+// Com està connectada la bomba, explicat. Si no ho està de cap de les dues
+// maneres que el programa entén, ho diu i explica quines són.
+function renderPumpConnection(info) {
+  processSource.replaceChildren();
+  processSource.hidden = false;
+
+  const title = document.createElement('h3');
+  title.className = 'lines-panel__subtitle';
+  title.textContent = 'Connexió';
+  processSource.appendChild(title);
+
+  const state = document.createElement('p');
+  state.className = 'process-panel__state';
+
+  if (info && info.mode === 'push') {
+    state.textContent = `Connectada al darrere de ${processElementName(info.targetId)}: `
+      + 'empeny el producte cap endavant (impulsió).';
+  } else if (info && info.mode === 'suction') {
+    state.textContent = `Connectada a la part de dalt de ${processElementName(info.targetId)}: `
+      + 'aspira el producte cap al punt de consum.';
+  } else {
+    state.classList.add('process-panel__state--warn');
+    state.textContent = 'Encara no fa funcionar cap línia. Connecta-la al connector '
+      + 'de darrere d\'un injector que sigui Pickup Point (impulsió) o al de dalt '
+      + 'd\'una tolva filtre (aspiració).';
+  }
+
+  processSource.appendChild(state);
 }
 
 // ---- Desfer / Refer ----
@@ -2863,6 +3128,8 @@ function restoreState(state) {
   // alt que hi ha al canvas: si ho fes, un element nou en reutilitzaria un
   // i les canonades es confondrien en desar i tornar a obrir.
   elementCount = Math.max(Number(state.elementCount) || 0, maxIdNumber);
+
+  refreshPumpBadges();
 
   // Desfer, refer i obrir un arxiu poden haver canviat el diagrama sencer i
   // la seqüència: la simulació s'ha de refer amb el que hi ha ara.
@@ -3327,10 +3594,11 @@ function buildSimulationScenario() {
     const source = ProcessModel.resolvePickupSource(graph, line.pickupPointId, canCrossElement);
 
     scenario.lines[signature] = {
-      // Les línies configurades sempre porten nom (vegeu
-      // openLineProcessPanel); el de reserva només el veuen les que encara
-      // no s'han configurat, que tampoc no es poden fer servir.
-      name: config.name || `Línia ${line.number}`,
+      // Les línies ja no tenen nom propi: el número és el que les
+      // identifica a la pantalla, i les bombes són el que diu qui les pot
+      // fer funcionar.
+      name: `Línia ${line.number}`,
+      pumps: line.pumpNames || [],
       throughput: config.throughput,
       diameter: config.diameter,
       length: config.length,
@@ -4477,6 +4745,7 @@ function simPipeTip(pipeElement, state) {
   title.textContent = line.name;
   nodes.push(title);
 
+  nodes.push(simTipRow('Bombes', pumpListLabel(line.pumps), !(line.pumps && line.pumps.length)));
   nodes.push(simTipRow('Rendiment', `${line.throughput} kg/h`));
   nodes.push(simTipRow('Estat', active
     ? (visual.mode === 'sweep' ? 'Fent barrido' : 'Treballant')

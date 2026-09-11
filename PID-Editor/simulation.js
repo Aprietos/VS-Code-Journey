@@ -392,6 +392,22 @@ const SimulationEngine = (() => {
         { storageId: id, atSeconds: emptiedAt[id] }));
     });
 
+    // Una línia sense cap bomba bufadora no té què la faci funcionar. És un
+    // avís i no un error: el càlcul de quilos no en depèn gens, però qui
+    // munti la instal·lació ho ha de saber.
+    const pumpless = new Set();
+    (safe.actions || []).forEach((action) => {
+      if (!MOVES_PRODUCT[action.type]) return;
+      const line = safe.lines[action.lineId];
+      if (line && !(Array.isArray(line.pumps) && line.pumps.length)) pumpless.add(action.lineId);
+    });
+
+    [...pumpless].sort().forEach((lineId) => {
+      warnings.push(issue('line-without-pump',
+        `${nameOf(safe.lines[lineId], lineId)} no té cap bomba bufadora que la pugui fer funcionar.`,
+        { lineId, atSeconds: 0 }));
+    });
+
     Object.keys(exceededAt).sort().forEach((id) => {
       const target = safe.consumptions[id];
       warnings.push(issue('capacity-exceeded',

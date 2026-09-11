@@ -227,6 +227,46 @@ explícitament com a "Sense configurar".
 
 ---
 
+## 4b. Bombes bufadores
+
+La bomba és el que fa moure el producte per una línia. **El seu tipus no el
+tria l'usuari**: es dedueix de com està connectada al diagrama
+(`detectPumps()` a `script.js`).
+
+| Com està connectada | Tipus | Quines línies pot fer funcionar |
+| --- | --- | --- |
+| Al port `input` d'un **injector amb rol de punt de recollida** (el connector de darrere, per on li entra l'aire) | **impulsió** | les que surten d'aquell punt de recollida, i les que surten d'un punt de recollida que quedi **aigües avall** dins del recorregut d'alguna d'aquelles (injectors en sèrie) |
+| Al port `output2` d'una **tolva filtre** (el connector de dalt de tot) | **aspiració** | les que **acaben** en aquella tolva filtre, que és el punt de consum |
+| De qualsevol altra manera | cap | cap; el distintiu del diagrama ho diu i la fitxa explica com s'ha de connectar |
+
+L'associació és **derivada de la topologia**, igual que les línies:
+`assignPumpsToLines()` s'executa al final de `findTransportLines()` i deixa
+`line.pumpIds` i `line.pumpNames` (ordenades pel nom). **No es desa mai.**
+L'únic que es desa d'una bomba és el **nom**, a `store.elements[id]` amb la
+fitxa de tipus `pump`.
+
+La regla dels injectors en sèrie es resol amb el recorregut que cada línia
+ja porta: `downstream` és, per a cada punt de recollida, el conjunt
+d'elements que apareixen als recorreguts de les seves línies. Una bomba
+d'impulsió al punt P serveix una línia si el punt de recollida d'aquesta
+línia és P o és dins d'aquell conjunt.
+
+**El nom s'assigna en néixer la bomba** (`createElementInstance`), amb el
+primer `Bomba N` lliure, perquè es veu al diagrama i al panell de línies
+abans que ningú n'obri la fitxa. A partir d'aquí és de l'usuari i no es
+torna a tocar.
+
+**Les línies ja no tenen nom.** El camp va desaparèixer de l'esquema
+(`SCHEMAS.line`) i el seu lloc a la interfície el fan servir les bombes; el
+que identifica una línia és el seu número. A la simulació, `line.name` de
+l'escenari és `Línia N` i `line.pumps` porta els noms de les bombes. El
+motor afegeix l'avís **`line-without-pump`** (no bloqueja) per a les línies
+usades per la seqüència que no en tenen cap.
+
+Els noms de línia desats per versions anteriors es queden a l'arxiu sense
+fer nosa: `writeEntry()` només escriu les claus de l'esquema, i cap pantalla
+no els llegeix.
+
 ## 5. Detecció de l'element d'emmagatzematge aigües amunt
 
 `ProcessModel.findUpstreamStorage(graph, startId, canCross)`
@@ -484,6 +524,7 @@ d'avisos ve buida: no s'informa a mitges d'un càlcul que no s'ha fet.
 
 | Codi d'avís | Quan salta |
 | --- | --- |
+| `line-without-pump` | Una línia que fa servir la seqüència no té cap bomba bufadora que la pugui fer funcionar (§4b). |
 | `storage-will-empty` | Un element d'emmagatzematge es buidarà durant la seqüència. Porta `atSeconds`. |
 | `capacity-exceeded` | Un punt de consum passa de la seva capacitat màxima. Porta `atSeconds`. |
 
@@ -1039,6 +1080,10 @@ Anotades pel camí i **no** implementades a propòsit:
   motor ja el dona a `compiled.keyTimes`.
 - Fer servir el diàmetre i la longitud de les línies per a alguna cosa: avui
   es desen i es mostren, però cap càlcul no en depèn.
+- Donar feina de debò a les bombes (§4b): avui el programa només sap **quina
+  bomba pot moure cada línia**. Triar-la durant la simulació, el cabal o la
+  pressió que dona, la potència, el consum i les restriccions de
+  funcionament simultani entre bombes estan tots per fer.
 - Donar física al barrido: avui ja sap per quina línia es fa (§9.3), o sigui
   que arrossegar el producte que queda a la canonada seria el pas natural.
   Es començaria per `MOVES_PRODUCT` a `simulation.js` (§6.5).
