@@ -1,11 +1,11 @@
 {
   "format": "pid-editor-model",
   "version": 2,
-  "savedAt": "2026-09-11T10:51:50.572Z",
+  "savedAt": "2026-09-11T21:43:14.429Z",
   "view": {
-    "x": 711.6932949789762,
-    "y": 91.7695518381894,
-    "scale": 0.4240976183724875
+    "x": 499.47238668431277,
+    "y": 27.45095828068027,
+    "scale": 0.26620000000000044
   },
   "state": {
     "elements": [
@@ -333,28 +333,6 @@
         }
       },
       {
-        "x": 429.5220947265625,
-        "y": 501.6003723144531,
-        "data": {
-          "type": "filter",
-          "id": "filter-41",
-          "rotation": "0",
-          "flipped": "0",
-          "scale": "1"
-        }
-      },
-      {
-        "x": 498.2286376953125,
-        "y": 420.2019958496094,
-        "data": {
-          "type": "filter",
-          "id": "filter-42",
-          "rotation": "0",
-          "flipped": "0",
-          "scale": "1"
-        }
-      },
-      {
         "x": 1387.117919921875,
         "y": 392.9916076660156,
         "data": {
@@ -588,6 +566,50 @@
           "scale": "1",
           "transportRole": "consumption",
           "transportRoleId": "4"
+        }
+      },
+      {
+        "x": 258.4330749511719,
+        "y": 435.4407043457031,
+        "data": {
+          "type": "pump",
+          "id": "pump-66",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 300.8075866699219,
+        "y": 582.3110961914062,
+        "data": {
+          "type": "pump",
+          "id": "pump-67",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 2520.171875,
+        "y": 928.0942993164062,
+        "data": {
+          "type": "pump",
+          "id": "pump-72",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 2506.1796875,
+        "y": 746.9135131835938,
+        "data": {
+          "type": "pump",
+          "id": "pump-73",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1"
         }
       }
     ],
@@ -857,36 +879,12 @@
         ]
       },
       {
-        "fromId": "injector-39",
-        "fromRole": "input",
-        "fromDir": "h",
-        "toId": "filter-42",
-        "toRole": "output",
-        "toDir": "h",
-        "segments": 3,
-        "freeValues": [
-          0.5
-        ]
-      },
-      {
         "fromId": "airlock-37",
         "fromRole": "output",
         "fromDir": "v",
         "toId": "injector-40",
         "toRole": "input2",
         "toDir": "v",
-        "segments": 3,
-        "freeValues": [
-          0.5
-        ]
-      },
-      {
-        "fromId": "injector-40",
-        "fromRole": "input",
-        "fromDir": "h",
-        "toId": "filter-41",
-        "toRole": "output",
-        "toDir": "h",
         "segments": 3,
         "freeValues": [
           0.5
@@ -1194,12 +1192,234 @@
         "toDir": "h",
         "segments": 2,
         "freeValues": []
+      },
+      {
+        "fromId": "pump-66",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "injector-39",
+        "toRole": "input",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "pump-67",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "injector-40",
+        "toRole": "input",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "pump-72",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "hopper-61",
+        "toRole": "output2",
+        "toDir": "v",
+        "segments": 2,
+        "freeValues": []
+      },
+      {
+        "fromId": "pump-73",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "hopper-58",
+        "toRole": "output2",
+        "toDir": "v",
+        "segments": 2,
+        "freeValues": []
       }
     ],
-    "elementCount": 65,
+    "elementCount": 73,
     "process": {
-      "elements": {},
-      "lines": {}
+      "elements": {
+        "trouserhopper-48": {
+          "name": "Tolva pantaló - S6",
+          "product": "Farina blanca",
+          "quantity": 1500,
+          "capacity": 1500
+        },
+        "trouserhopper-13": {
+          "name": "Tolva pantaló - S7",
+          "product": "Farina integral",
+          "quantity": 1500,
+          "capacity": 1500
+        },
+        "trouserhopper-4": {
+          "name": "Tolva pantaló - S8",
+          "product": "Farina bruta",
+          "quantity": 2000,
+          "capacity": 2000
+        },
+        "trouserhopper-36": {
+          "name": "Tolva pantaló - S4",
+          "product": "Sucre cristall",
+          "quantity": 1000,
+          "capacity": 1000
+        },
+        "gravityhopper-23": {
+          "name": "Tolva de gravetat - S5",
+          "product": "Sucre canya",
+          "quantity": 1000,
+          "capacity": 1000
+        },
+        "hopper-58": {
+          "name": "Tolva filtre - C1",
+          "product": "",
+          "quantity": 0,
+          "capacity": 2000
+        },
+        "hopper-61": {
+          "name": "Tolva filtre - C2",
+          "product": "",
+          "quantity": 0,
+          "capacity": 2000
+        },
+        "hopper-64": {
+          "name": "Tolva filtre - C3",
+          "product": "",
+          "quantity": 0,
+          "capacity": 2000
+        },
+        "hopper-65": {
+          "name": "Tolva filtre - C4",
+          "product": "",
+          "quantity": 0,
+          "capacity": 2000
+        },
+        "pump-66": {
+          "name": "Bomba 1"
+        },
+        "pump-67": {
+          "name": "Bomba 2"
+        },
+        "pump-68": {
+          "name": "Bomba 3"
+        },
+        "pump-69": {
+          "name": "Bomba 4"
+        },
+        "pump-70": {
+          "name": "Bomba 5"
+        },
+        "pump-71": {
+          "name": "Bomba 6"
+        },
+        "pump-72": {
+          "name": "Bomba 3"
+        },
+        "pump-73": {
+          "name": "Bomba 4"
+        }
+      },
+      "lines": {
+        "injector-52|hopper-61|injector-52>injector-17>diverter-62>hopper-61": {
+          "name": "",
+          "throughput": 1200,
+          "diameter": 0,
+          "length": 0
+        },
+        "injector-51|hopper-58|injector-51>injector-7>diverter-60>hopper-58": {
+          "name": "",
+          "throughput": 1200,
+          "diameter": 0,
+          "length": 0
+        },
+        "injector-17|hopper-61|injector-17>diverter-62>hopper-61": {
+          "name": "",
+          "throughput": 1200,
+          "diameter": 0,
+          "length": 0
+        },
+        "injector-16|hopper-58|injector-16>injector-8>diverter-63>diverter-60>hopper-58": {
+          "name": "",
+          "throughput": 1200,
+          "diameter": 0,
+          "length": 0
+        },
+        "injector-16|hopper-61|injector-16>injector-8>diverter-63>diverter-62>hopper-61": {
+          "name": "",
+          "throughput": 2400,
+          "diameter": 0,
+          "length": 0
+        },
+        "injector-8|hopper-58|injector-8>diverter-63>diverter-60>hopper-58": {
+          "name": "",
+          "throughput": 2400,
+          "diameter": 0,
+          "length": 0
+        },
+        "injector-8|hopper-61|injector-8>diverter-63>diverter-62>hopper-61": {
+          "name": "",
+          "throughput": 2400,
+          "diameter": 0,
+          "length": 0
+        },
+        "injector-7|hopper-58|injector-7>diverter-60>hopper-58": {
+          "name": "",
+          "throughput": 2400,
+          "diameter": 0,
+          "length": 0
+        },
+        "injector-40|hopper-65|injector-40>diverter-45>hopper-65": {
+          "name": "",
+          "throughput": 2000,
+          "diameter": 0,
+          "length": 0
+        },
+        "injector-26|hopper-65|injector-26>diverter-43>diverter-45>hopper-65": {
+          "name": "",
+          "throughput": 2000,
+          "diameter": 0,
+          "length": 0
+        },
+        "injector-39|hopper-64|injector-39>diverter-44>hopper-64": {
+          "name": "",
+          "throughput": 3000,
+          "diameter": 0,
+          "length": 0
+        },
+        "injector-26|hopper-64|injector-26>diverter-43>diverter-44>hopper-64": {
+          "name": "",
+          "throughput": 3000,
+          "diameter": 0,
+          "length": 0
+        }
+      },
+      "sequence": [
+        {
+          "order": 1,
+          "type": "transport",
+          "pumpId": "pump-66",
+          "lineId": "injector-39|hopper-64|injector-39>diverter-44>hopper-64",
+          "startTime": 0,
+          "duration": 180
+        },
+        {
+          "order": 2,
+          "type": "transport",
+          "pumpId": "pump-67",
+          "lineId": "injector-40|hopper-65|injector-40>diverter-45>hopper-65",
+          "startTime": 0,
+          "duration": 300
+        },
+        {
+          "order": 3,
+          "type": "transport",
+          "pumpId": "pump-66",
+          "lineId": "injector-39|hopper-64|injector-39>diverter-44>hopper-64",
+          "startTime": 180,
+          "duration": 300
+        }
+      ]
     }
   }
 }
