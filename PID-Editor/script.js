@@ -1537,9 +1537,11 @@ const ROLE_TYPES = {
   [ROLE_PICKUP]: ['injector'],
   [ROLE_CONSUMPTION]: ['hopper'],
   // El silo és l'element d'emmagatzematge dedicat que ja tenia el programa;
-  // la descàrrega de sacs fa de magatzem a tots els efectes, i la tolva
-  // filtre pot fer-ne quan no fa de punt de consum.
-  [ROLE_STORAGE]: ['silo', 'bagdump', 'hopper'],
+  // la descàrrega de sacs fa de magatzem a tots els efectes, i les tolves
+  // poden fer-ne totes (la filtre, quan no fa de punt de consum). Un cop
+  // marcades com a magatzem passen a ser terminals del recorregut, com
+  // qualsevol element amb rol: cap ruta no hi passa a través.
+  [ROLE_STORAGE]: ['silo', 'bagdump', 'hopper', 'gravityhopper', 'trouserhopper'],
 };
 
 const ROLE_LABELS = {
@@ -2328,16 +2330,23 @@ function closeProcessPanelFor(elementId) {
   if (processEditor && processEditor.elementId === elementId) closeProcessPanel();
 }
 
+// Nom per defecte d'un element: el seu tipus i el distintiu del rol
+// ("Silo - S1", "Injector - P7"). Es fa servir en dos llocs, i per això és
+// una funció i no un text escrit dues vegades: per ensenyar l'element allà
+// on encara no té nom, i per omplir el camp Nom de la seva fitxa la primera
+// vegada que s'obre.
+function defaultElementName(element) {
+  const role = element.dataset.transportRole;
+  const badge = role ? ` - ${ROLE_PREFIX[role]}${element.dataset.transportRoleId}` : '';
+  return `${typeLabel(element.dataset.type)}${badge}`;
+}
+
 // Nom amb què es presenta un element: el que li hagi posat l'usuari a la
-// fitxa i, si encara no en té cap, el nom del tipus amb el distintiu del
-// rol ("Silo S1").
+// fitxa i, si encara no en té cap, el nom per defecte.
 function elementDisplayName(element) {
   const role = element.dataset.transportRole;
   const stored = role ? ProcessModel.getElement(element.dataset.id, role) : null;
-  if (stored && stored.name) return stored.name;
-
-  const badge = role ? ` ${ROLE_PREFIX[role]}${element.dataset.transportRoleId}` : '';
-  return `${typeLabel(element.dataset.type)}${badge}`;
+  return (stored && stored.name) ? stored.name : defaultElementName(element);
 }
 
 function processElementName(elementId) {
@@ -2564,13 +2573,19 @@ function openElementProcessPanel(element) {
   if (!role) return;
 
   const elementId = element.dataset.id;
+  const values = ProcessModel.getElement(elementId, role);
+
+  // El camp Nom surt ja omplert la primera vegada, de manera que un element
+  // configurat sempre acaba tenint un nom llegible sense haver-lo d'escriure.
+  // Un nom que l'usuari ja hi hagi posat no es toca mai.
+  if (!values.name) values.name = defaultElementName(element);
 
   const editor = {
     kind: role,
     elementId,
     title: ROLE_LABELS[role],
     subject: `${typeLabel(element.dataset.type)} · ${ROLE_PREFIX[role]}${element.dataset.transportRoleId}`,
-    values: ProcessModel.getElement(elementId, role),
+    values,
     onSave: (values, raw) => {
       ProcessModel.setElement(elementId, role, values);
       // L'elecció d'origen no és un camp de l'esquema sinó una decisió que

@@ -58,13 +58,19 @@ Quins tipus d'element admeten quin rol es declara a `ROLE_TYPES`:
 const ROLE_TYPES = {
   [ROLE_PICKUP]:      ['injector'],
   [ROLE_CONSUMPTION]: ['hopper'],
-  [ROLE_STORAGE]:     ['silo', 'bagdump', 'hopper'],
+  [ROLE_STORAGE]:     ['silo', 'bagdump', 'hopper', 'gravityhopper', 'trouserhopper'],
 };
 ```
 
 `hopper` (Tolva filtre) hi surt dues vegades: pot ser punt de consum **o**
 element d'emmagatzematge, mai les dues coses. `requestRoleChange()` demana
 confirmació (`window.confirm`) abans de substituir un rol per un altre.
+
+Marcar com a magatzem una tolva que fins ara feia de pas (la de gravetat o
+la pantaló) la converteix en **terminal** de tots dos recorreguts, com
+qualsevol element amb rol: les rutes que hi passaven pel mig s'aturen allà.
+És el comportament correcte —un magatzem és un extrem—, però és un canvi
+visible al panell de línies.
 
 Les tres cadenes `'pickup'`, `'consumption'` i `'storage'` són un **contracte
 estable**: les fan servir `script.js`, `process.js`, l'atribut de l'element i
@@ -94,6 +100,12 @@ Camp addicional fora de l'esquema: `storageChoice` a la fitxa d'un `pickup`
 (l'element d'emmagatzematge triat a mà, vegeu §5). No és un camp de dades
 sinó una decisió que mana sobre un càlcul, i per això no surt a l'esquema
 però sí que es desa.
+
+El camp `name` de la fitxa d'un element surt **ja omplert** la primera
+vegada que s'obre, amb el format `Tipus - Distintiu` (`Silo - S1`,
+`Injector - P7`, `Tolva filtre - C3`), que dona `defaultElementName()` a
+`script.js`. No s'aplica a les línies: el seu número canvia a cada recàlcul
+i un nom que el portés a dins quedaria desfasat.
 
 ### 3.2 Unitats i números
 
