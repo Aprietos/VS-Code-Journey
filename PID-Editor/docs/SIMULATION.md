@@ -4,11 +4,18 @@ Document de referència per a qui continuï el projecte sense haver vist com
 es va fer. Descriu **què hi ha ara mateix** a la capa de dades de procés de
 l'Editor P&ID, on viu cada cosa i quines regles no s'han de trencar.
 
-Escrit en acabar l'**etapa 1** (assignar producte, quantitats i paràmetres
-físics als elements i a les línies de transport, i guardar-ho amb el
-projecte). Res del que hi ha aquí simula res: no hi ha motor de simulació,
-ni temps, ni transferència de massa, ni seqüències. Vegeu
-[Què NO hi ha](#què-no-hi-ha).
+Escrit en acabar l'**etapa 2**:
+
+- **Etapa 1** — capa de dades de procés: rols d'element, producte,
+  quantitats, capacitats, configuració de les línies de transport i
+  detecció de l'element d'emmagatzematge aigües amunt (§1–§9).
+- **Etapa 2** — **motor de càlcul de la simulació**: seqüència d'accions,
+  compilació en trams, consulta d'estat en qualsevol instant i validació
+  prèvia (§6, §7).
+
+L'etapa 2 **no ha canviat res de la pantalla**: no hi ha cap botó ni cap
+panell nou. El motor existeix, es pot executar i està provat, però encara no
+el crida ningú des de la interfície. Vegeu [Què NO hi ha](#què-no-hi-ha).
 
 ---
 
@@ -21,21 +28,26 @@ aquest ordre, que **importa**.
 | Fitxer | Què fa |
 | --- | --- |
 | `index.html` | Marcatge. Barra d'eines, `<svg id="canvas">`, panell de línies de transport i panell de configuració de procés. |
-| `process.js` | **Capa de dades de procés.** No toca el DOM. Defineix l'esquema de les fitxes, el magatzem, la signatura de línia, la detecció aigües amunt, la validació i la serialització. |
+| `process.js` | **Capa de dades de procés.** No toca el DOM. Defineix l'esquema de les fitxes, el model de seqüència, el magatzem, la signatura de línia, la detecció aigües amunt, la validació i la serialització. |
+| `simulation.js` | **Motor de càlcul de la simulació.** No toca el DOM ni modifica res. Rep un escenari i retorna resultats (§6). |
 | `script.js` | Tota la resta: dibuix dels elements, canonades, selecció, zoom/pan, rols, detecció de línies de transport, panells, desfer/refer i arxius. |
 | `styles.css` | Estils. |
+| `tests/` | Proves automàtiques del motor (§7). |
 | `Exemples/` | Models `.pid.json` de mostra. |
 
-`process.js` s'ha de carregar **abans** que `script.js`, perquè defineix la
-constant global `ProcessModel` que `script.js` fa servir.
+L'ordre de càrrega és `process.js` → `simulation.js` → `script.js`:
+`ProcessModel` i `SimulationEngine` són constants globals i s'han de definir
+abans que qui les faci servir.
 
 ### Per què dos fitxers
 
-La regla de separació de capes és: **`process.js` no sap què és un SVG i
-`script.js` no conté lògica de procés.** Quan la lògica necessita conèixer
-la topologia del diagrama, `script.js` l'hi passa com una estructura plana
-(vegeu `buildProcessGraph()`), mai elements del DOM. Aquesta és l'única
-passarel·la entre les dues capes; manteniu-la.
+La regla de separació de capes és: **`process.js` i `simulation.js` no
+saben què és un SVG, i `script.js` no conté lògica de procés ni de càlcul.**
+Quan la lògica necessita conèixer la topologia del diagrama, `script.js`
+l'hi passa com una estructura plana (vegeu `buildProcessGraph()`), mai
+elements del DOM. Aquesta és l'única passarel·la entre les capes;
+manteniu-la. És també el que permet provar els números sense obrir cap
+pantalla.
 
 ---
 
@@ -107,7 +119,30 @@ vegada que s'obre, amb el format `Tipus - Distintiu` (`Silo - S1`,
 `script.js`. No s'aplica a les línies: el seu número canvia a cada recàlcul
 i un nom que el portés a dins quedaria desfasat.
 
-### 3.2 Unitats i números
+### 3.2 La seqüència d'accions
+
+Una seqüència és una llista **ordenada** d'accions que s'executen una
+darrere l'altra, **sense solapaments**: només n'hi ha una d'activa alhora.
+Viu a `ProcessModel` (`getSequence()` / `setSequence()`); qui l'executa és
+el motor (§6).
+
+```js
+{ order: 1, type: 'transport', lineId: '<signatura de línia>', duration: 600 }
+```
+
+| Camp | Què és |
+| --- | --- |
+| `order` | Posició dins la seqüència: 1, 2, 3… `normalizeSequence()` la renumera sola a partir de la posició real a la llista. |
+| `type` | Un de `ProcessModel.ACTION_TYPES`: `transport`, `rest` (Descans), `sweep` (Barrido), `startup` (Posada a règim). |
+| `lineId` | La línia de transport (la seva **signatura**, §4). Obligatòria a les accions de transport. |
+| `duration` | **En segons**, sempre més gran que 0. A la pantalla es veurà en minuts; el model no arrodoneix mai. |
+
+**La seqüència encara NO es desa a l'arxiu del projecte.** `serialize()` la
+deixa fora expressament i `load()` i `clear()` la buiden. Desar-la és feina
+de l'etapa següent: s'hi afegeix a `serialize()` i a `load()` de
+`process.js`, i prou.
+
+### 3.3 Unitats i números
 
 - Massa **kg**, rendiment **kg/h**, diàmetre **mm**, longitud **m**. La
   unitat es dibuixa sempre dins l'etiqueta del camp.
@@ -117,7 +152,7 @@ i un nom que el portés a dins quedaria desfasat.
 - `validate()` rebutja números negatius i, als camps marcats `positive: true`
   (ara només `throughput`), també el 0.
 
-### 3.3 El magatzem
+### 3.4 El magatzem
 
 ```js
 {
@@ -136,9 +171,11 @@ l'usuari desfà el canvi al diagrama, la configuració hi torna sola. Només
 s'esborra per acció explícita (el botó "Elimina" de les configuracions sense
 línia, o "Neteja tot", que buida el model sencer).
 
-### 3.4 API pública
+### 3.5 API pública
 
-`ProcessModel` exposa: `ROLES`, `schemaFor`, `defaultsFor`, `getElement`,
+`ProcessModel` exposa: `ROLES`, `ACTION_TYPES`, `ACTION_LABELS`,
+`getSequence`, `setSequence`, `createAction`, `normalizeSequence`,
+`schemaFor`, `defaultsFor`, `getElement`,
 `setElement`, `hasElement`, `deleteElement`, `getPickupChoice`,
 `setPickupChoice`, `getLine`, `setLine`, `hasLine`, `deleteLine`,
 `orphanLines`, `lineSignature`, `findUpstreamStorage`, `resolvePickupSource`,
@@ -263,7 +300,209 @@ producte ha de cridar `resolvePickupSource()`, no llegir cap camp desat.
 
 ---
 
-## 6. Format de guardat
+## 6. El motor de simulació (`simulation.js`)
+
+Donada una situació inicial i una seqüència d'accions, el motor sap
+exactament quants kg hi ha a cada lloc en cada instant. **No toca el DOM,
+no modifica mai les dades del projecte i es pot executar sense obrir cap
+pantalla.** Tres funcions:
+
+```js
+const compiled = SimulationEngine.compile(scenario);   // ho precalcula tot
+const state    = SimulationEngine.stateAt(compiled, 180);  // estat al segon 180
+const report   = SimulationEngine.validate(scenario);  // errors i avisos
+```
+
+### 6.1 L'escenari que rep
+
+Un objecte pla. El motor no en modifica mai res.
+
+```js
+{
+  storages: {
+    'silo-3': { name: 'Silo farina', product: 'Farina', quantity: 1000, capacity: 20000 },
+  },
+  consumptions: {
+    'hopper-8': { name: 'Amassadora', product: 'Farina', quantity: 0, capacity: 800 },
+  },
+  lines: {
+    '<signatura>': {
+      name: 'L1', throughput: 600,      // kg/h
+      configured: true,                  // opcional; false = encara no configurada
+      pickupId: 'injector-5', pickupName: 'Injector - P1',
+      consumptionId: 'hopper-8',
+      storageId: 'silo-3',
+      storageStatus: 'found',            // 'found' | 'chosen' | 'ambiguous' | 'none'
+    },
+  },
+  actions: [ /* vegeu §3.2 */ ],
+}
+```
+
+**Qui construeix aquest escenari a partir del diagrama de debò encara no
+existeix**: és feina de l'etapa següent. Tota la informació hi és, però:
+
+| Camp de l'escenari | D'on surt |
+| --- | --- |
+| `storages` / `consumptions` | `ProcessModel.getElement(id, rol)` per a cada element amb rol `storage` / `consumption` (`elementsWithRole()` a `script.js` els llista). |
+| clau de `lines` | `ProcessModel.lineSignature(line)` de cada línia de `findTransportLines()`. |
+| `name`, `throughput` | `ProcessModel.getLine(signatura)`; `configured` ← `ProcessModel.hasLine(signatura)`. |
+| `pickupId` / `consumptionId` | `line.pickupPointId` / `line.consumptionPointId` de `findTransportLines()`. |
+| `storageId` / `storageStatus` | `ProcessModel.resolvePickupSource(buildProcessGraph(), pickupId, canCrossElement)` → `.storageId` i `.status`. |
+
+### 6.2 Com es calcula: moments clau i trams
+
+El motor **no** simula sumant increments petits instant a instant. Això
+acumularia error, faria que el resultat depengués de la mida del pas i
+impediria moure el cursor enrere amb precisió. En comptes d'això:
+
+1. `compile()` calcula per endavant **tots els moments clau**: l'inici i el
+   final de cada acció i, quan un element d'emmagatzematge s'esgota enmig
+   d'una acció, **l'instant exacte** en què passa. Aquest instant surt de
+   **dividir la massa que queda pel cabal**, no de provar instants:
+   `segons = kg · 3600 / (kg/h)`.
+2. Entre dos moments clau consecutius **tot varia de manera perfectament
+   lineal**. Cada tram guarda la situació **exacta al seu inici** i el
+   cabal de cada element durant el tram.
+3. `stateAt()` és llavors: trobar el tram i interpolar.
+
+D'aquí surten dues garanties que **no es poden trencar**:
+
+- `stateAt(compiled, t)` és una **funció pura** de `(compiled, t)`. No
+  guarda estat, no depèn de cap consulta anterior. Consultar el minut 3
+  dona sempre exactament el mateix resultat, s'hi arribi com s'hi arribi i a
+  la velocitat de reproducció que sigui.
+- Els valors al final de cada tram es calculen **una sola vegada** i es fan
+  servir com a inici exacte del següent. Mai s'arrosseguen interpolacions.
+
+Dos detalls que fan que els números surtin rodons:
+
+- Els càlculs es fan **multiplicant primer i dividint per 3600 al final**
+  (`kg/h × segons / 3600`), no convertint el cabal a kg/s abans. Així 600
+  kg/h durant 600 s dona **100 kg exactes**, no 99,999999999999.
+- Just a la frontera entre dos trams, `stateAt()` agafa el valor guardat
+  com a **inici del tram nou**, no el que sortiria d'interpolar el tram
+  anterior. I al final de tot fa servir `compiled.final`, calculat i no
+  interpolat.
+
+### 6.3 Què retorna `compile()`
+
+```js
+{
+  ok: true,
+  errors: [], warnings: [ { code, message, atSeconds, ... } ],
+  segments: [ {
+    index, startTime, endTime, actionOrder, actionType, lineId, moving,
+    storages:     { id: { start, ratePerHour, rate } },   // rate negatiu
+    consumptions: { id: { start, ratePerHour, rate } },
+    lines:        { id: { start, ratePerHour, rate } },   // kg acumulats per línia
+  } ],
+  actions: [ {
+    order, type, lineId, startTime, endTime, duration, moving,
+    transferred,          // kg realment moguts
+    complete,             // false si s'ha quedat curta
+    incompleteReason,     // 'storage-empty'
+  } ],
+  keyTimes: [ 0, 300, 600, ... ],   // tots els moments clau, en segons
+  totalDuration: 720,
+  final: { storages: {...}, consumptions: {...}, lines: {...} },
+}
+```
+
+`ratePerHour` (kg/h) és el número **autoritatiu**; `rate` (kg/s) és el
+mateix valor per ensenyar-lo per pantalla. Per interpolar, feu servir
+`stateAt()`.
+
+### 6.4 Què retorna `stateAt()`
+
+```js
+{
+  time, totalDuration, finished,
+  action: { order, type, lineId, startTime, endTime, duration, progress, complete, incompleteReason },
+  activeLineId,                  // '' si en aquell instant no es mou res
+  storages:     { id: kg },
+  consumptions: { id: kg },      // kg acumulats (quantitat inicial inclosa)
+  lines:        { id: kg },      // kg transferits per aquella línia
+  warnings: [ ... ],             // només els que ja han passat (atSeconds <= time)
+}
+```
+
+El temps demanat es retalla a `[0, totalDuration]`: consultar abans del
+començament o després del final no dispara mai.
+
+### 6.5 Límits físics
+
+- **Una línia no pot transferir mai més del que queda** al seu element
+  d'emmagatzematge. En arribar a 0 kg la transferència s'atura **en
+  l'instant exacte** i l'acció queda `complete: false` amb
+  `incompleteReason: 'storage-empty'` i els kg realment transferits.
+- **Passar de la capacitat d'un punt de consum es permet**, però genera
+  l'avís `capacity-exceeded` amb l'instant exacte en què passa. Una
+  capacitat de 0 vol dir "encara no definida" i no es comprova.
+
+**On afegir-ne més:** a `buildAction()` de `simulation.js`. Cada límit nou
+(pressió mínima, cabal màxim de la canonada, temps de posada a règim…) és un
+moment clau més i, per tant, un tall de tram més. El patró a seguir és el de
+l'element que es buida: calcular l'instant exacte, tallar-hi el tram i
+marcar l'acció.
+
+**Física de barrido i posada a règim:** avui només ocupen temps. El lloc per
+començar a canviar-ho és la taula `MOVES_PRODUCT` de `simulation.js`, i
+després `buildAction()`, que és qui decideix quins trams genera cada acció.
+
+### 6.6 Errors i avisos
+
+Els **errors bloquegen** (`ok: false`, no es calcula res). Els **avisos no
+bloquegen**. Tots porten `code` (per al programa) i `message` (una frase
+pensada per a un enginyer que no programa). Quan hi ha errors, la llista
+d'avisos ve buida: no s'informa a mitges d'un càlcul que no s'ha fet.
+
+| Codi d'error | Quan salta |
+| --- | --- |
+| `empty-sequence` | La seqüència no té cap acció. |
+| `invalid-duration` | Una acció té durada zero o negativa. |
+| `unknown-action-type` | El tipus d'acció no és cap dels coneguts. |
+| `missing-line` | Una acció de transport no té línia, o la que tenia ja no existeix. |
+| `line-not-configured` | La línia encara no s'ha configurat (`configured: false`). |
+| `line-no-throughput` | La línia no té rendiment o és 0. |
+| `line-without-source` | La línia no té Pickup Point d'origen. |
+| `line-without-target` | La línia no té punt de consum de destí. |
+| `storage-not-detected` | El Pickup Point no té cap element d'emmagatzematge que l'alimenti. |
+| `storage-ambiguous` | La detecció va donar més d'un candidat i no se n'ha triat cap. |
+| `storage-empty` | L'element d'emmagatzematge comença sense gens de producte. |
+| `product-mismatch` | El producte de l'origen i el del destí d'una línia no coincideixen. |
+
+| Codi d'avís | Quan salta |
+| --- | --- |
+| `storage-will-empty` | Un element d'emmagatzematge es buidarà durant la seqüència. Porta `atSeconds`. |
+| `capacity-exceeded` | Un punt de consum passa de la seva capacitat màxima. Porta `atSeconds`. |
+
+**Producte en blanc = "encara no definit"**, i no contradiu res: només hi ha
+`product-mismatch` si les dues bandes en tenen un i són diferents. Això vol
+dir que si un punt de consum sense producte rep de dos magatzems amb
+productes diferents, ara mateix no salta cap error (vegeu §11).
+
+## 7. Les proves automàtiques
+
+**Com executar-les: obre `tests/tests.html` amb el navegador** (doble clic al
+fitxer). Si tot va bé, la barra de dalt surt **verda** i diu
+`RESUM: 33 proves, totes correctes.`. Per tornar-les a executar, F5.
+
+No cal instal·lar res: el projecte no té build ni gestor de paquets, i la
+pàgina carrega `process.js` i `simulation.js` **de debò**, no una còpia.
+
+| Fitxer | Què és |
+| --- | --- |
+| `tests/tests.html` | La pàgina que s'obre. |
+| `tests/runner.js` | Executor mínim: `Test.group()`, `Test.case()` i les comprovacions. |
+| `tests/simulation.test.js` | Les proves del motor. |
+
+Les comprovacions són d'**igualtat exacta** per defecte (`assert.equal`).
+`assert.close` només es fa servir quan la coma flotant no pot donar un
+resultat exacte, i amb un marge ridículament petit. Si algun dia cal
+afluixar-lo, hi ha un problema de debò.
+
+## 8. Format de guardat
 
 Un arxiu `.pid.json` és:
 
@@ -307,7 +546,7 @@ totes.
 
 ---
 
-## 7. La interfície (`script.js`)
+## 9. La interfície (`script.js`)
 
 ### Panell de configuració de procés
 
@@ -340,7 +579,7 @@ la configuració d'una línia n'actualitzi el text **sense** refer la detecció
 
 ---
 
-## 8. Regles que no s'han de trencar
+## 10. Regles que no s'han de trencar
 
 1. **`process.js` no toca el DOM.** Si cal la topologia, es passa plana des
    de `script.js` amb `buildProcessGraph()`.
@@ -356,10 +595,18 @@ la configuració d'una línia n'actualitzi el text **sense** refer la detecció
 7. **Un element, un rol.** Substituir-lo demana confirmació.
 8. **La detecció no és contínua**: només en obrir la fitxa o en prémer el
    botó corresponent.
+9. **El motor no toca mai les dades del projecte.** Rep un escenari i
+   retorna resultats nous.
+10. **El càlcul no és acumulatiu.** Res de sumar increments a cada instant:
+    moments clau precalculats i interpolació lineal dins de cada tram.
+11. **`stateAt()` ha de continuar sent una funció pura.** El dia que guardi
+    estat entre crides, el mateix instant deixarà de donar el mateix
+    resultat i tot el disseny se'n va en orris.
+12. **Els errors es detecten abans de començar**, mai enmig del càlcul.
 
 ---
 
-## 9. Paranys coneguts
+## 11. Paranys coneguts
 
 - **`clearAll()` reinicia `elementCount` a 0**, de manera que un element nou
   podria rebre l'identificador d'un d'esborrat. Per això `clearAll()` també
@@ -374,10 +621,19 @@ la configuració d'una línia n'actualitzi el text **sense** refer la detecció
   llegeix igual i es desa i es cancel·la amb la resta de la fitxa.
 - **No hi ha validació creuada** entre `quantity` i `capacity` (es pot posar
   una quantitat més gran que la capacitat). No es va demanar.
-- **El projecte no té tests automàtics ni build.** La comprovació d'aquesta
-  etapa es va fer amb una pàgina temporal que carregava `process.js` i
-  `script.js` en un navegador sense finestra i executava 70 assercions.
-  No s'ha deixat al repositori.
+- **El projecte no té build ni gestor de paquets.** Les proves del motor
+  són una pàgina que s'obre (§7). La interfície (`script.js`) no té proves
+  automàtiques: es comprova a mà.
+- **La massa es conserva fins on arriben els números en coma flotant.** Amb
+  un cabal que no divideix bé (777 kg/h, per exemple) el que baixa d'un
+  magatzem i el que puja a un consum poden diferir en unes 10⁻¹⁴ kg, perquè
+  90,65 no es pot escriure exactament en binari. No és cap error de
+  l'algorisme i no hi ha manera de fer-ho millor amb números decimals
+  normals. Hi ha una prova que ho vigila amb un marge de 10⁻⁹ kg.
+- **Si un punt de consum no té producte definit**, pot rebre de dos
+  magatzems amb productes diferents sense que salti cap error. La
+  comprovació de productes és per línia (origen contra destí) i un producte
+  en blanc no contradiu res.
 
 ---
 
@@ -385,15 +641,23 @@ la configuració d'una línia n'actualitzi el text **sense** refer la detecció
 
 Res d'això existeix, ni tan sols començat, i no s'ha de donar per fet:
 
-- Motor de simulació, transferència de massa, evolució temporal.
-- Seqüències, accions, durades, editor de seqüències.
+- **Cap element d'interfície de simulació**: ni botons, ni panells, ni
+  modals, ni botó de càlcul de temps.
+- Editor visual de seqüències (l'estructura de dades sí, §3.2; l'editor no).
 - Play / Pausa / Stop, velocitats, cronograma, cursor temporal.
 - Barres de nivell o percentatges sobre els elements del diagrama.
 - Animacions de flux, partícules, ressaltat de línia activa.
 - Tooltips de simulació, resums, informes.
-- Validacions relatives a la simulació.
+- Desar la seqüència a l'arxiu del projecte (§3.2).
+- El pont que construeix l'escenari a partir del diagrama (§6.1).
+- Física de barrido i posada a règim (§6.5).
+- Accions en paral·lel. L'execució és estrictament seqüencial. Els trams
+  porten inici i final **absoluts**, de manera que el dia que calgui
+  permetre solapaments el que canviarà és com es decideixen aquests
+  inicis, no la resta del motor.
 
-Idees anotades durant l'etapa 1 i **no** implementades a propòsit: avisar
-quan la quantitat inicial supera la capacitat; avisar quan el producte d'un
-punt de consum no coincideix amb el de l'storage que l'alimenta; poder posar
-nom als elements sense rol.
+Idees anotades i **no** implementades a propòsit: poder posar nom als
+elements sense rol; avisar quan un punt de consum sense producte rep de dos
+magatzems amb productes diferents (§11); avisar quan una acció queda
+incompleta (avui es veu a `compiled.actions[].complete`, però no genera cap
+avís propi).

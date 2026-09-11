@@ -68,6 +68,63 @@ const ProcessModel = (() => {
     return values;
   }
 
+  // ---- Seqüència d'accions ----
+  // Una seqüència és una llista ORDENADA d'accions que s'executen una
+  // darrere l'altra, sense solapaments: només n'hi ha una d'activa alhora.
+  //
+  // Cada acció és { order, type, lineId, duration }:
+  //   · `order`    posició dins la seqüència, 1, 2, 3...
+  //   · `type`     un dels ACTION_TYPES.
+  //   · `lineId`   la línia de transport (la seva signatura, vegeu
+  //                lineSignature). Obligatòria a les accions de transport.
+  //   · `duration` en SEGONS, sempre més gran que 0. A la pantalla es
+  //                veurà en minuts; el model no arrodoneix mai.
+  //
+  // Qui executa tot això és SimulationEngine (simulation.js); aquí només hi
+  // viuen les dades.
+  const ACTION_TYPES = {
+    TRANSPORT: 'transport',
+    REST: 'rest',
+    SWEEP: 'sweep',
+    STARTUP: 'startup',
+  };
+
+  const ACTION_LABELS = {
+    [ACTION_TYPES.TRANSPORT]: 'Transport',
+    [ACTION_TYPES.REST]: 'Descans',
+    [ACTION_TYPES.SWEEP]: 'Barrido',
+    [ACTION_TYPES.STARTUP]: 'Posada a règim',
+  };
+
+  // La seqüència viu en memòria i, de moment, NO es desa a l'arxiu del
+  // model: desar-la és feina de l'etapa següent, que l'afegirà a
+  // serialize() i a load() (vegeu docs/SIMULATION.md). Per això load() i
+  // clear() la buiden: mentre no es desi, obrir un model no la pot
+  // restaurar i val més quedar-se sense que no pas amb la d'un altre model.
+  let sequence = [];
+
+  function createAction(values) {
+    const source = values || {};
+    return {
+      order: Number(source.order) || 0,
+      type: source.type || ACTION_TYPES.TRANSPORT,
+      lineId: source.lineId || '',
+      duration: Number(source.duration) || 0,
+    };
+  }
+
+  // Renumera l'ordre 1..n a partir de la posició real a la llista, de
+  // manera que l'ordre no pugui quedar mai desparellat amb la seqüència.
+  // No valida res: de dir què està malament se n'encarrega el motor, que
+  // és qui sap donar el missatge sencer.
+  function normalizeSequence(actions) {
+    return (Array.isArray(actions) ? actions : []).map((action, index) => {
+      const normalized = createAction(action);
+      normalized.order = index + 1;
+      return normalized;
+    });
+  }
+
   // ---- Magatzem ----
   // Dos diccionaris plans. `elements` va indexat per l'identificador de
   // l'element (silo-3, hopper-12...), que no es reutilitza mai mentre el
@@ -255,9 +312,18 @@ const ProcessModel = (() => {
 
   return {
     ROLES: { PICKUP: ROLE_PICKUP, CONSUMPTION: ROLE_CONSUMPTION, STORAGE: ROLE_STORAGE },
+    ACTION_TYPES,
+    ACTION_LABELS,
 
     schemaFor,
     defaultsFor,
+
+    // Seqüència d'accions. getSequence() retorna una còpia: qui la demana
+    // no pot modificar la de dins sense passar per setSequence().
+    getSequence: () => sequence.map((action) => ({ ...action })),
+    setSequence: (actions) => { sequence = normalizeSequence(actions); },
+    createAction,
+    normalizeSequence,
 
     // Configuració d'un element, per rol. `has` distingeix un element que
     // l'usuari ha configurat d'un que encara no ha tocat mai.
@@ -302,6 +368,8 @@ const ProcessModel = (() => {
     // fora es tracta com a dubtós (un arxiu pot venir d'una versió
     // anterior o estar tocat a mà): el que no encaixi s'ignora i la resta
     // s'obre igualment.
+    // La seqüència d'accions NO hi surt: desar-la a l'arxiu és feina de
+    // l'etapa següent. Quan toqui, s'hi afegeix aquí i a load().
     serialize: () => ({
       elements: JSON.parse(JSON.stringify(store.elements)),
       lines: JSON.parse(JSON.stringify(store.lines)),
@@ -309,6 +377,7 @@ const ProcessModel = (() => {
 
     load: (data) => {
       store = { elements: {}, lines: {} };
+      sequence = [];
       if (!data || typeof data !== 'object') return;
 
       ['elements', 'lines'].forEach((bucket) => {
@@ -321,6 +390,6 @@ const ProcessModel = (() => {
       });
     },
 
-    clear: () => { store = { elements: {}, lines: {} }; },
+    clear: () => { store = { elements: {}, lines: {} }; sequence = []; },
   };
 })();

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Proves — Editor P&amp;ID</title>
+  <style>
+    :root {
+      --bg: #faf9f5;
+      --panel: #ffffff;
+      --border: #e3ddce;
+      --text: #1f1b16;
+      --muted: #736858;
+      --ok: #3f6b49;
+      --ok-bg: #eef4ef;
+      --fail: #b4271d;
+      --fail-bg: #fbeeed;
+    }
+    body {
+      margin: 0;
+      padding: 1.5rem;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif;
+      font-size: 0.88rem;
+      line-height: 1.4;
+    }
+    h1 { margin: 0 0 0.25rem; font-size: 1.15rem; }
+    .intro { margin: 0 0 1.2rem; color: var(--muted); font-size: 0.8rem; max-width: 46rem; }
+    h2 {
+      margin: 1.4rem 0 0.5rem;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+    .summary {
+      position: sticky;
+      top: 0;
+      margin-bottom: 1rem;
+      padding: 0.7rem 0.9rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .summary--ok { border-color: var(--ok); background: var(--ok-bg); color: var(--ok); }
+    .summary--fail { border-color: var(--fail); background: var(--fail-bg); color: var(--fail); }
+    .case {
+      margin-bottom: 0.3rem;
+      padding: 0.4rem 0.6rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+      font-size: 0.76rem;
+      white-space: pre-wrap;
+    }
+    .case--ok { color: var(--ok); }
+    .case--fail { border-color: var(--fail); background: var(--fail-bg); color: var(--fail); }
+  </style>
+</head>
+<body>
+  <h1>Proves del motor de simulació</h1>
+  <p class="intro">
+    Aquesta pàgina comprova els números que calcula el motor de simulació.
+    No obre l'editor ni toca cap diagrama. Si tot va bé, la barra de sota
+    surt verda. Per tornar-les a executar, recarrega la pàgina (F5).
+  </p>
+
+  <pre id="summary" class="summary">Executant…</pre>
+  <div id="results"></div>
+
+  <!-- El model de procés i el motor són els mateixos fitxers que fa servir
+       l'aplicació: les proves comproven el codi de debò, no una còpia. -->
+  <script src="../process.js"></script>
+  <script src="../simulation.js"></script>
+  <script src="runner.js"></script>
+  <script src="simulation.test.js"></script>
+</body>
+</html>
