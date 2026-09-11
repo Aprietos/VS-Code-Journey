@@ -4633,9 +4633,15 @@ function loadSimPanelLayout() {
 
 // Arrossegament genèric: pointerdown, moure i deixar anar, amb el punter
 // capturat perquè no es perdi si el cursor surt de l'element.
-function simPanelDrag(handle, className, onMove) {
+//
+// `canStart` es comprova ABANS de res. És important que sigui abans del
+// preventDefault: aturar un pointerdown també atura el clic que ve després,
+// i si la nansa és una zona que conté botons (la barra del títol), tocar-los
+// deixaria de funcionar.
+function simPanelDrag(handle, className, onMove, canStart) {
   handle.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
+    if (canStart && !canStart(event)) return;
     event.preventDefault();
 
     const start = {
@@ -4690,12 +4696,19 @@ simPanelDrag(simGrip, 'sim-panel--resizing', (dx, dy, start) => {
   simPanelLayout.height = start.height + dy;
 });
 
-// La barra del títol mou la finestra, però no quan s'ha clicat un control.
+// La barra del títol mou la finestra. Només quan està desancorada i només
+// si no s'ha tocat cap control: Play, Pausa, Stop, el desplegable de
+// velocitat i els botons d'ancorar i tancar hi viuen a sobre i han de
+// continuar funcionant com sempre.
+const SIM_BAR_CONTROLS = 'button, select, input, textarea, label, a, [role="button"]';
+
 simPanelDrag(simBar, 'sim-panel--dragging', (dx, dy, start) => {
-  if (!start.floating) return;
   simPanelLayout.left = start.left + dx;
   simPanelLayout.top = start.top + dy;
-});
+}, (event) => (
+  simPanelLayout.floating
+  && !(event.target.closest && event.target.closest(SIM_BAR_CONTROLS))
+));
 
 // Amb el teclat: les fletxes amunt i avall canvien l'alçada de vint en vint.
 simResizeHandle.addEventListener('keydown', (event) => {
