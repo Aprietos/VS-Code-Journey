@@ -279,9 +279,13 @@ const templates = {
 };
 
 // Posició (en coordenades locals de l'element) dels punts de connexió de
-// cada tipus. Els noms de rol (input, input2, output, output2...) es fan
-// servir tal qual com a classe/atribut per pintar el punt del color que
-// toqui (vegeu styles.css) i per identificar-lo en connectar canonades.
+// cada tipus. Els noms de rol es fan servir tal qual com a classe/atribut
+// per pintar el punt del color que toqui (vegeu styles.css) i per
+// identificar-lo en connectar canonades. Hi ha tres famílies: input/input2...
+// per a les entrades, output/output2... per a les sortides i
+// common/branch/branch2 per als elements sense un sentit de flux fix, on un
+// mateix punt pot fer d'entrada o de sortida segons com es faci servir
+// l'element (ara mateix, només la desviadora).
 // Els valors de connectionOffsets/rotationPivots/mirrorPivotX ja estan
 // expressats en coordenades "post-reducció", és a dir, multiplicats per
 // SHAPE_SCALE[type] quan l'element en té una (vegeu més avall). Així els
@@ -290,7 +294,13 @@ const templates = {
 const connectionOffsets = {
   pump: { output: { x: 73.5, y: 33.75 } },
   valve: { input: { x: 11.25, y: 0 }, output: { x: 11.25, y: 45 } },
-  diverter: { input: { x: 0, y: 35 }, output: { x: 70, y: 35 }, output2: { x: 67.5, y: 67.5 } },
+  // La desviadora pot dividir (1 → 2) o ajuntar (2 → 1), de manera que cap
+  // dels seus punts és entrada o sortida per definició. Es diuen, doncs, pel
+  // paper que fan a la forma: `common` és el punt sol d'un costat i
+  // `branch`/`branch2` les dues vies de l'altre (la recta i la desviada).
+  // Vegeu PORT_SIDES, que és qui imposa que el producte hagi de creuar de
+  // `common` a una branca i no pugui mai anar d'una branca a l'altra.
+  diverter: { common: { x: 0, y: 35 }, branch: { x: 70, y: 35 }, branch2: { x: 67.5, y: 67.5 } },
   hopper: { input2: { x: 0, y: 43.5 }, output: { x: 37, y: 103 }, output2: { x: 37, y: 0 } },
   gravityhopper: { input: { x: 28.125, y: 0 }, output: { x: 28.125, y: 95.625 } },
   trouserhopper: { input: { x: 35, y: 0 }, output: { x: 17.5, y: 85 }, output2: { x: 52.5, y: 85 } },
@@ -342,7 +352,7 @@ const MIRRORABLE_TYPES = new Set(Object.keys(mirrorPivotX));
 const PORT_DIRECTIONS = {
   pump: { output: 'h' },
   valve: { input: 'v', output: 'v' },
-  diverter: { input: 'h', output: 'h', output2: 'v' },
+  diverter: { common: 'h', branch: 'h', branch2: 'v' },
   hopper: { input2: 'h', output: 'v', output2: 'v' },
   gravityhopper: { input: 'v', output: 'v' },
   trouserhopper: { input: 'v', output: 'v', output2: 'v' },
@@ -1621,11 +1631,14 @@ function updateRoleBadge(element) {
 
 // ---- Rutes de transport (derivades de la topologia) ----
 // Recorregut NO dirigit: encara no hi ha sentit de producte definit, i per
-// tant una canonada es pot travessar en qualsevol sentit. Una ruta és un
-// camí simple (sense repetir element ni canonada) que va d'un punt de
-// recollida a un punt de consum sense passar per cap altre element amb rol:
-// els punts amb rol són terminals. La llista NO es persisteix ni es
-// recalcula sola: és informació derivada i només es refà sota demanda.
+// tant una canonada es pot travessar en qualsevol sentit. El que sí que
+// imposa restriccions és la forma de cada element: n'hi ha que només deixen
+// passar el producte d'un costat a l'altre, i no entre dos punts del mateix
+// costat (vegeu PORT_SIDES). Una ruta és un camí simple (sense repetir
+// element ni canonada) que va d'un punt de recollida a un punt de consum
+// sense passar per cap altre element amb rol: els punts amb rol són
+// terminals. La llista NO es persisteix ni es recalcula sola: és informació
+// derivada i només es refà sota demanda.
 
 // Límits de protecció contra explosió combinatòria. Amb bucles i
 // desviadores en cascada el nombre de camins simples pot créixer de manera
@@ -1645,6 +1658,70 @@ const MAX_SEARCH_STEPS = 100000;
 // deduir-ho del nombre de ports, permet ampliar-la quan calgui sense tocar
 // l'algoritme.
 const TRAVERSABLE_TYPES = new Set(['injector', 'sieve', 'valve', 'diverter']);
+
+// Punts de connexió que comparteixen un mateix costat de l'element, per als
+// tipus en què el producte només pot anar d'un costat a l'altre. Dos punts
+// del MATEIX grup no comuniquen entre ells: una ruta que entri per un d'ells
+// n'ha de sortir per un punt d'un altre grup.
+//
+// La desviadora és el cas que ho demana. Té un punt sol a un costat
+// (`common`) i dos a l'altre (`branch`, la via recta, i `branch2`, la
+// desviada), i treballa igual de bé en els dos sentits: dividint (hi entra
+// una canonada pel punt comú i en surten dues) o ajuntant (hi entren dues i
+// en surt una pel punt comú). Sigui com sigui, el sentit és sempre
+// travessant l'element d'un costat a l'altre; el que no pot fer mai és
+// passar el producte d'una de les dues branques a l'altra sense passar pel
+// punt comú, que és el bypàs que abans s'hi colava i feia aparèixer rutes
+// impossibles.
+//
+// Els grups es donen per rol, no per coordenades: girar l'element (l'únic
+// canvi d'orientació que admet, vegeu ROTATABLE_TYPES) en mou els punts però
+// no canvia quin és quin, de manera que la restricció val per a qualsevol
+// rotació. Els tipus que no surten aquí no tenen cap restricció: qualsevol
+// punt comunica amb qualsevol altre, com fins ara.
+const PORT_SIDES = {
+  diverter: [['common'], ['branch', 'branch2']],
+};
+
+// Cert si el producte pot travessar un element d'aquest tipus entrant pel
+// punt `fromPort` i sortint pel `toPort`. Un punt que no aparegui a cap grup
+// no queda restringit, de manera que afegir un punt de connexió nou a un
+// tipus no el pot deixar aïllat per oblit.
+function canCrossElement(type, fromPort, toPort) {
+  const sides = PORT_SIDES[type];
+  if (!sides) return true;
+
+  const fromSide = sides.findIndex((side) => side.includes(fromPort));
+  const toSide = sides.findIndex((side) => side.includes(toPort));
+  if (fromSide === -1 || toSide === -1) return true;
+  return fromSide !== toSide;
+}
+
+// Elements cablejats de manera que el producte no hi pot passar: tenen més
+// d'una canonada, però totes a punts d'un mateix costat (vegeu PORT_SIDES),
+// de manera que cap parella dels seus punts connectats comunica entre ells.
+// Abans d'imposar els costats, el recorregut hi passava a través fent el
+// bypàs impossible; ara són carrerons sense sortida, i val més dir-ho que
+// deixar que les rutes desapareguin sense cap explicació. Amb una sola
+// canonada no compta: és un extrem de la instal·lació, no un error.
+function findBlockedElements(nodes) {
+  const blocked = [];
+
+  nodes.forEach((node) => {
+    const type = node.element.dataset.type;
+    if (!PORT_SIDES[type]) return;
+
+    const ports = [...node.ports.keys()];
+    if (ports.length < 2) return;
+
+    const crosses = ports.some((from, i) => (
+      ports.slice(i + 1).some((to) => canCrossElement(type, from, to))
+    ));
+    if (!crosses) blocked.push(node.element);
+  });
+
+  return blocked;
+}
 
 // Les canonades no tenen identificador propi, però cada punt de connexió
 // només pot allotjar-ne una (vegeu isPointConnected), així que el parell
@@ -1697,6 +1774,7 @@ function canonicalPathKey(path) {
 
 function findTransportLines() {
   const nodes = buildTopology();
+  const blocked = findBlockedElements(nodes);
   const lines = [];
   const seenPaths = new Set();
   const truncated = { pathLength: false, perPair: false, total: false, steps: false };
@@ -1764,6 +1842,10 @@ function findTransportLines() {
       for (const port of ports) {
         if (stopped()) return;
         if (port === enteredPort) continue;
+        // Tampoc se'n pot sortir per un punt del mateix costat que aquell
+        // pel qual s'hi ha entrat: el producte no travessa l'element d'una
+        // branca a l'altra (vegeu PORT_SIDES).
+        if (enteredPort !== null && !canCrossElement(typeOf(nodeId), enteredPort, port)) continue;
 
         steps += 1;
         if (steps > MAX_SEARCH_STEPS) {
@@ -1832,7 +1914,7 @@ function findTransportLines() {
     line.routeCount = routesPerPair.get(pair);
   });
 
-  return { lines, truncated };
+  return { lines, truncated, blocked };
 }
 
 // ---- Ressaltat del recorregut al canvas ----
@@ -1863,6 +1945,19 @@ function highlightTransportLine(line) {
   });
 }
 
+// Marca al canvas els elements mal cablejats que ha trobat el recàlcul. És
+// germana del ressaltat (només afegeix una classe, i treure-la ho deixa tot
+// com estava), però amb una vida diferent: no va i ve amb el cursor, sinó
+// que es queda fins al recàlcul següent o fins que es tanqui el panell.
+// Cridar-la sense arguments és, doncs, la manera d'esborrar-la. Cal perquè
+// els elements no porten cap identificador visible: sense la marca, dir-ho
+// només de paraula al panell no serviria per trobar-los a l'esquema.
+function markBlockedElements(elements = []) {
+  viewport.querySelectorAll('.pid-element--blocked')
+    .forEach((el) => el.classList.remove('pid-element--blocked'));
+  elements.forEach((el) => el.classList.add('pid-element--blocked'));
+}
+
 // ---- Panell de línies de transport ----
 const linesPanel = document.getElementById('lines-panel');
 const linesToggle = document.getElementById('lines-toggle');
@@ -1879,8 +1974,9 @@ function renderTransportLines() {
   pinnedLine = null;
   clearTransportHighlight();
 
-  const { lines, truncated } = findTransportLines();
+  const { lines, truncated, blocked } = findTransportLines();
   const notes = [];
+  markBlockedElements(blocked);
 
   if (!elementsWithRole(ROLE_PICKUP).length) {
     notes.push(`Cap ${ROLE_LABELS[ROLE_PICKUP]} definit.`);
@@ -1893,6 +1989,15 @@ function renderTransportLines() {
   }
   if (truncated.pathLength || truncated.perPair || truncated.total || truncated.steps) {
     notes.push('S\'ha assolit un límit intern de cerca: la llista pot ser incompleta.');
+  }
+
+  // De quins tipus són: ara mateix només hi poden sortir desviadores, però
+  // la comprovació és general i el nom es llegeix de la barra d'eines.
+  if (blocked.length) {
+    const kinds = [...new Set(blocked.map((el) => typeLabel(el.dataset.type).toLowerCase()))];
+    notes.push(blocked.length === 1
+      ? `1 element (${kinds.join(', ')}) té totes les canonades al mateix costat: el producte no hi pot passar. Queda marcat al canvas.`
+      : `${blocked.length} elements (${kinds.join(', ')}) tenen totes les canonades al mateix costat: el producte no hi pot passar. Queden marcats al canvas.`);
   }
 
   linesNote.textContent = notes.join(' ');
@@ -1973,6 +2078,7 @@ function closeLinesPanel() {
   linesToggle.setAttribute('aria-expanded', 'false');
   pinnedLine = null;
   clearTransportHighlight();
+  markBlockedElements();
 }
 
 linesToggle.addEventListener('click', () => {
@@ -2171,11 +2277,38 @@ redoButton.addEventListener('click', redo);
 //   · Un arxiu d'una versió MÉS NOVA que la del programa s'intenta obrir
 //     igualment (el format només creix), avisant que pot faltar-hi coses.
 const FILE_FORMAT = 'pid-editor-model';
-const FILE_VERSION = 1;
+const FILE_VERSION = 2;
 const FILE_EXTENSION = '.pid.json';
 
 const MODEL_MIGRATIONS = {
-  // 1: (model) => { ...porta un arxiu v1 a v2...; return model; },
+  // v1 → v2: els punts de connexió de la desviadora es deien input/output/
+  // output2, com si tingués un sentit de flux fix. Ara es diuen common/
+  // branch/branch2 (vegeu connectionOffsets), que és el que són de debò. Cal
+  // reanomenar-los a les canonades dels arxius antics: si no, restoreState
+  // no trobaria aquells punts i descartaria, en silenci, totes les canonades
+  // connectades a una desviadora.
+  1: (model) => {
+    const renamed = { input: 'common', output: 'branch', output2: 'branch2' };
+
+    // Només les desviadores: a la resta de tipus, input/output/output2
+    // continuen sent els noms bons.
+    const diverters = new Set();
+    (model.state.elements || []).forEach((raw) => {
+      const entry = normalizeElementEntry(raw);
+      if (entry.data.type === 'diverter') diverters.add(entry.data.id);
+    });
+
+    (model.state.pipes || []).forEach((pipe) => {
+      if (diverters.has(pipe.fromId) && renamed[pipe.fromRole]) {
+        pipe.fromRole = renamed[pipe.fromRole];
+      }
+      if (diverters.has(pipe.toId) && renamed[pipe.toRole]) {
+        pipe.toRole = renamed[pipe.toRole];
+      }
+    });
+
+    return model;
+  },
 };
 
 const saveModelButton = document.getElementById('save-model');

@@ -20,6 +20,14 @@
   --line-fill: #ffffff;
   --input-color: #c3624a;
   --output-color: #6a9873;
+  /* Punts que poden fer d'entrada o de sortida (vegeu .connection-point):
+     un groc del mateix to apagat que el vermell i el verd, per no cridar
+     més que ells. */
+  --reversible-color: #c9963a;
+  /* Avís d'element mal cablejat. És l'únic roig "d'error" de la paleta,
+     deliberadament fora de la gamma càlida de l'accent perquè no es pugui
+     confondre amb el ressaltat d'una ruta. */
+  --warn: #b4271d;
   --pipe: #6b6355;
   --handle: #d97757;
 }
@@ -281,6 +289,17 @@ body {
   fill: var(--output-color);
 }
 
+/* Tercera família: els elements que no tenen un sentit de flux fix (la
+   desviadora, que pot dividir o ajuntar) anomenen els seus punts
+   "common"/"branch"/"branch2" en lloc d'entrada o sortida, perquè cap d'ells
+   no és una cosa o l'altra per definició. Es pinten tots del mateix groc,
+   que és el que ho diu d'un cop d'ull: aquí el producte pot anar en els dos
+   sentits. Vegeu connectionOffsets i PORT_SIDES a script.js. */
+.connection-point[data-role="common"],
+.connection-point[data-role^="branch"] {
+  fill: var(--reversible-color);
+}
+
 .connection-point:hover {
   fill: var(--accent);
 }
@@ -530,6 +549,14 @@ body {
 
 .pid-element--highlight {
   filter: drop-shadow(0 0 3px var(--accent));
+}
+
+/* Avís d'element que, pel cablejat, no pot conduir producte: totes les seves
+   canonades van al mateix costat (vegeu findBlockedElements). Es marca amb
+   una aura roja doble, prou diferent del ressaltat d'una ruta, i es posa i
+   es treu amb la mateixa lògica de "només afegir estil" que el ressaltat. */
+.pid-element--blocked {
+  filter: drop-shadow(0 0 2px var(--warn)) drop-shadow(0 0 6px var(--warn));
 }
 
 /* Focus visible per a qui navega amb el teclat. Es fa servir
