@@ -1,0 +1,241 @@
+{
+  "format": "pid-editor-model",
+  "version": 1,
+  "savedAt": "2026-09-11T09:19:12.003Z",
+  "view": {
+    "x": 100.93631029301247,
+    "y": -53.24590495867784,
+    "scale": 0.751314800901578
+  },
+  "state": {
+    "elements": [
+      {
+        "x": 171,
+        "y": 122,
+        "data": {
+          "type": "injector",
+          "id": "injector-1",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1",
+          "transportRole": "pickup",
+          "transportRoleId": "1"
+        }
+      },
+      {
+        "x": 183,
+        "y": 224,
+        "data": {
+          "type": "injector",
+          "id": "injector-2",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1",
+          "transportRole": "pickup",
+          "transportRoleId": "2"
+        }
+      },
+      {
+        "x": 180,
+        "y": 318,
+        "data": {
+          "type": "injector",
+          "id": "injector-3",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1",
+          "transportRole": "pickup",
+          "transportRoleId": "3"
+        }
+      },
+      {
+        "x": 441,
+        "y": 112,
+        "data": {
+          "type": "sieve",
+          "id": "sieve-4",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 528.6599731445312,
+        "y": 371.91998291015625,
+        "data": {
+          "type": "sieve",
+          "id": "sieve-5",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 744.6799926757812,
+        "y": 104.08999633789062,
+        "data": {
+          "type": "diverter",
+          "id": "diverter-6",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 1094.85009765625,
+        "y": 286.3900146484375,
+        "data": {
+          "type": "diverter",
+          "id": "diverter-7",
+          "rotation": "180",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 1082.02001953125,
+        "y": 169.47000122070312,
+        "data": {
+          "type": "diverter",
+          "id": "diverter-8",
+          "rotation": "180",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 1388.6300048828125,
+        "y": 303.3699951171875,
+        "data": {
+          "type": "hopper",
+          "id": "hopper-9",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1",
+          "transportRole": "consumption",
+          "transportRoleId": "2"
+        }
+      },
+      {
+        "x": 1381.8499755859375,
+        "y": 123.87999725341797,
+        "data": {
+          "type": "hopper",
+          "id": "hopper-10",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1",
+          "transportRole": "consumption",
+          "transportRoleId": "1"
+        }
+      }
+    ],
+    "pipes": [
+      {
+        "fromId": "diverter-7",
+        "fromRole": "input",
+        "fromDir": "h",
+        "toId": "hopper-9",
+        "toRole": "input2",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "diverter-8",
+        "fromRole": "input",
+        "fromDir": "h",
+        "toId": "hopper-10",
+        "toRole": "input2",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "injector-1",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "sieve-4",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          1.8430715789473664
+        ]
+      },
+      {
+        "fromId": "sieve-4",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "diverter-6",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          -0.4755062511308882
+        ]
+      },
+      {
+        "fromId": "injector-3",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "sieve-5",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 2,
+        "freeValues": []
+      },
+      {
+        "fromId": "sieve-5",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "diverter-7",
+        "toRole": "output",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          -0.30318624999967486
+        ]
+      },
+      {
+        "fromId": "injector-2",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "diverter-8",
+        "toRole": "output",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.8759388637770807
+        ]
+      },
+      {
+        "fromId": "diverter-6",
+        "fromRole": "output2",
+        "fromDir": "v",
+        "toId": "diverter-7",
+        "toRole": "output2",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          1.056860369227776
+        ]
+      },
+      {
+        "fromId": "diverter-6",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "diverter-8",
+        "toRole": "output2",
+        "toDir": "v",
+        "segments": 2,
+        "freeValues": []
+      }
+    ],
+    "elementCount": 10
+  }
+}

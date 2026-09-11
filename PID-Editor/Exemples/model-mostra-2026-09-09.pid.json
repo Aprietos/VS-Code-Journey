@@ -1,0 +1,1205 @@
+{
+  "format": "pid-editor-model",
+  "version": 2,
+  "savedAt": "2026-09-11T10:51:50.572Z",
+  "view": {
+    "x": 711.6932949789762,
+    "y": 91.7695518381894,
+    "scale": 0.4240976183724875
+  },
+  "state": {
+    "elements": [
+      {
+        "x": -94.12796020507812,
+        "y": 30.20513153076172,
+        "data": {
+          "type": "silo",
+          "id": "silo-1",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1",
+          "transportRole": "storage",
+          "transportRoleId": "3"
+        }
+      },
+      {
+        "x": -35.940155029296875,
+        "y": 424.2251281738281,
+        "data": {
+          "type": "valve",
+          "id": "valve-3",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": -58.97711181640625,
+        "y": 548.133056640625,
+        "data": {
+          "type": "trouserhopper",
+          "id": "trouserhopper-4",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1",
+          "transportRole": "storage",
+          "transportRoleId": "8"
+        }
+      },
+      {
+        "x": -87.88742065429688,
+        "y": 688.7454223632812,
+        "data": {
+          "type": "airlock",
+          "id": "airlock-5",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 3.6929028034210205,
+        "y": 688.8623657226562,
+        "data": {
+          "type": "airlock",
+          "id": "airlock-6",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": -1.8835132122039795,
+        "y": 767.7312622070312,
+        "data": {
+          "type": "injector",
+          "id": "injector-7",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1",
+          "transportRole": "pickup",
+          "transportRoleId": "6"
+        }
+      },
+      {
+        "x": -94.06082153320312,
+        "y": 848.63671875,
+        "data": {
+          "type": "injector",
+          "id": "injector-8",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1",
+          "transportRole": "pickup",
+          "transportRoleId": "5"
+        }
+      },
+      {
+        "x": -569.242431640625,
+        "y": 27.994930267333984,
+        "data": {
+          "type": "silo",
+          "id": "silo-11",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1",
+          "transportRole": "storage",
+          "transportRoleId": "2"
+        }
+      },
+      {
+        "x": -511.0546569824219,
+        "y": 422.0149230957031,
+        "data": {
+          "type": "valve",
+          "id": "valve-12",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": -534.091552734375,
+        "y": 545.9228515625,
+        "data": {
+          "type": "trouserhopper",
+          "id": "trouserhopper-13",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1",
+          "transportRole": "storage",
+          "transportRoleId": "7"
+        }
+      },
+      {
+        "x": -563.0018920898438,
+        "y": 686.5352172851562,
+        "data": {
+          "type": "airlock",
+          "id": "airlock-14",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1"
+        }
+      },
+      {
+        "x": -471.4216003417969,
+        "y": 686.6521606445312,
+        "data": {
+          "type": "airlock",
+          "id": "airlock-15",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": -477.52532958984375,
+        "y": 846.8847045898438,
+        "data": {
+          "type": "injector",
+          "id": "injector-16",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1",
+          "transportRole": "pickup",
+          "transportRoleId": "4"
+        }
+      },
+      {
+        "x": -568.7935180664062,
+        "y": 926.8810424804688,
+        "data": {
+          "type": "injector",
+          "id": "injector-17",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1",
+          "transportRole": "pickup",
+          "transportRoleId": "3"
+        }
+      },
+      {
+        "x": 975.3063354492188,
+        "y": -113.1348648071289,
+        "data": {
+          "type": "bagdump",
+          "id": "bagdump-21",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 1003.9892578125,
+        "y": 44.03288269042969,
+        "data": {
+          "type": "screwfeeder",
+          "id": "screwfeeder-22",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 1076.681640625,
+        "y": 128.3568572998047,
+        "data": {
+          "type": "gravityhopper",
+          "id": "gravityhopper-23",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1",
+          "transportRole": "storage",
+          "transportRoleId": "5"
+        }
+      },
+      {
+        "x": 1086.2735595703125,
+        "y": 291.18890380859375,
+        "data": {
+          "type": "airlock",
+          "id": "airlock-24",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 1079.8341064453125,
+        "y": 382.3455505371094,
+        "data": {
+          "type": "injector",
+          "id": "injector-26",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1",
+          "transportRole": "pickup",
+          "transportRoleId": "9"
+        }
+      },
+      {
+        "x": 943.3800048828125,
+        "y": 337.09222412109375,
+        "data": {
+          "type": "filter",
+          "id": "filter-27",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 586.6348266601562,
+        "y": -87.23487091064453,
+        "data": {
+          "type": "bagdump",
+          "id": "bagdump-28",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 614.8892822265625,
+        "y": 101.83290100097656,
+        "data": {
+          "type": "screwfeeder",
+          "id": "screwfeeder-29",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 676.8200073242188,
+        "y": 218.94081115722656,
+        "data": {
+          "type": "trouserhopper",
+          "id": "trouserhopper-36",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1",
+          "transportRole": "storage",
+          "transportRoleId": "4"
+        }
+      },
+      {
+        "x": 649.2406005859375,
+        "y": 387.0531921386719,
+        "data": {
+          "type": "airlock",
+          "id": "airlock-37",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 740.8209228515625,
+        "y": 387.1701354980469,
+        "data": {
+          "type": "airlock",
+          "id": "airlock-38",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 734.3353271484375,
+        "y": 464.2208557128906,
+        "data": {
+          "type": "injector",
+          "id": "injector-39",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1",
+          "transportRole": "pickup",
+          "transportRoleId": "8"
+        }
+      },
+      {
+        "x": 643.0672607421875,
+        "y": 546.9444580078125,
+        "data": {
+          "type": "injector",
+          "id": "injector-40",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1",
+          "transportRole": "pickup",
+          "transportRoleId": "7"
+        }
+      },
+      {
+        "x": 429.5220947265625,
+        "y": 501.6003723144531,
+        "data": {
+          "type": "filter",
+          "id": "filter-41",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 498.2286376953125,
+        "y": 420.2019958496094,
+        "data": {
+          "type": "filter",
+          "id": "filter-42",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 1387.117919921875,
+        "y": 392.9916076660156,
+        "data": {
+          "type": "diverter",
+          "id": "diverter-43",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 1705.1865234375,
+        "y": 202.76890563964844,
+        "data": {
+          "type": "diverter",
+          "id": "diverter-44",
+          "rotation": "90",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 1976.4041748046875,
+        "y": 195.55870056152344,
+        "data": {
+          "type": "diverter",
+          "id": "diverter-45",
+          "rotation": "90",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": -1085.205322265625,
+        "y": 24.174217224121094,
+        "data": {
+          "type": "silo",
+          "id": "silo-46",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1",
+          "transportRole": "storage",
+          "transportRoleId": "1"
+        }
+      },
+      {
+        "x": -1027.017578125,
+        "y": 418.1942138671875,
+        "data": {
+          "type": "valve",
+          "id": "valve-47",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": -1050.054443359375,
+        "y": 542.1021118164062,
+        "data": {
+          "type": "trouserhopper",
+          "id": "trouserhopper-48",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1",
+          "transportRole": "storage",
+          "transportRoleId": "6"
+        }
+      },
+      {
+        "x": -1078.96484375,
+        "y": 682.7144775390625,
+        "data": {
+          "type": "airlock",
+          "id": "airlock-49",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1"
+        }
+      },
+      {
+        "x": -987.3844604492188,
+        "y": 682.8314208984375,
+        "data": {
+          "type": "airlock",
+          "id": "airlock-50",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": -993.4881591796875,
+        "y": 768.5184936523438,
+        "data": {
+          "type": "injector",
+          "id": "injector-51",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1",
+          "transportRole": "pickup",
+          "transportRoleId": "2"
+        }
+      },
+      {
+        "x": -1084.75634765625,
+        "y": 925.7876586914062,
+        "data": {
+          "type": "injector",
+          "id": "injector-52",
+          "rotation": "0",
+          "flipped": "1",
+          "scale": "1",
+          "transportRole": "pickup",
+          "transportRoleId": "1"
+        }
+      },
+      {
+        "x": -1298.301513671875,
+        "y": 880.4434814453125,
+        "data": {
+          "type": "filter",
+          "id": "filter-53",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": -1229.594970703125,
+        "y": 724.4996337890625,
+        "data": {
+          "type": "filter",
+          "id": "filter-54",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": -1261.4132080078125,
+        "y": 801.7723388671875,
+        "data": {
+          "type": "filter",
+          "id": "filter-55",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 2328.07373046875,
+        "y": 835.3773193359375,
+        "data": {
+          "type": "hopper",
+          "id": "hopper-58",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1",
+          "transportRole": "consumption",
+          "transportRoleId": "1"
+        }
+      },
+      {
+        "x": 1457.248779296875,
+        "y": 838.9613037109375,
+        "data": {
+          "type": "diverter",
+          "id": "diverter-60",
+          "rotation": "180",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 2336.23828125,
+        "y": 976.1814575195312,
+        "data": {
+          "type": "hopper",
+          "id": "hopper-61",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1",
+          "transportRole": "consumption",
+          "transportRoleId": "2"
+        }
+      },
+      {
+        "x": 1179.0557861328125,
+        "y": 986.08935546875,
+        "data": {
+          "type": "diverter",
+          "id": "diverter-62",
+          "rotation": "180",
+          "flipped": "0",
+          "scale": "1"
+        }
+      },
+      {
+        "x": 508.8863830566406,
+        "y": 857.7066650390625,
+        "data": {
+          "type": "diverter",
+          "id": "diverter-63",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "0.9870242225298471"
+        }
+      },
+      {
+        "x": 2288.82080078125,
+        "y": -32.05754852294922,
+        "data": {
+          "type": "hopper",
+          "id": "hopper-64",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1",
+          "transportRole": "consumption",
+          "transportRoleId": "3"
+        }
+      },
+      {
+        "x": 2292.805419921875,
+        "y": 111.66188049316406,
+        "data": {
+          "type": "hopper",
+          "id": "hopper-65",
+          "rotation": "0",
+          "flipped": "0",
+          "scale": "1",
+          "transportRole": "consumption",
+          "transportRoleId": "4"
+        }
+      }
+    ],
+    "pipes": [
+      {
+        "fromId": "airlock-5",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "injector-8",
+        "toRole": "input2",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "airlock-6",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "injector-7",
+        "toRole": "input2",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "trouserhopper-4",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "airlock-5",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "trouserhopper-4",
+        "fromRole": "output2",
+        "fromDir": "v",
+        "toId": "airlock-6",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "silo-1",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "valve-3",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "valve-3",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "trouserhopper-4",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "airlock-15",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "injector-16",
+        "toRole": "input2",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "airlock-14",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "injector-17",
+        "toRole": "input2",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "trouserhopper-13",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "airlock-14",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "trouserhopper-13",
+        "fromRole": "output2",
+        "fromDir": "v",
+        "toId": "airlock-15",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "silo-11",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "valve-12",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "valve-12",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "trouserhopper-13",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "bagdump-21",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "screwfeeder-22",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "screwfeeder-22",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "gravityhopper-23",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "airlock-24",
+        "fromRole": "input",
+        "fromDir": "v",
+        "toId": "gravityhopper-23",
+        "toRole": "output",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "filter-27",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "injector-26",
+        "toRole": "input",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "airlock-24",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "injector-26",
+        "toRole": "input2",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "bagdump-28",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "screwfeeder-29",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "screwfeeder-29",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "trouserhopper-36",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "trouserhopper-36",
+        "fromRole": "output2",
+        "fromDir": "v",
+        "toId": "airlock-38",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "trouserhopper-36",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "airlock-37",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "airlock-38",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "injector-39",
+        "toRole": "input2",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "injector-39",
+        "fromRole": "input",
+        "fromDir": "h",
+        "toId": "filter-42",
+        "toRole": "output",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "airlock-37",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "injector-40",
+        "toRole": "input2",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "injector-40",
+        "fromRole": "input",
+        "fromDir": "h",
+        "toId": "filter-41",
+        "toRole": "output",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "injector-26",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "diverter-43",
+        "toRole": "common",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "diverter-43",
+        "fromRole": "branch",
+        "fromDir": "h",
+        "toId": "diverter-44",
+        "toRole": "branch2",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "diverter-43",
+        "fromRole": "branch2",
+        "fromDir": "v",
+        "toId": "diverter-45",
+        "toRole": "branch2",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.0023870598789962
+        ]
+      },
+      {
+        "fromId": "injector-39",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "diverter-44",
+        "toRole": "branch",
+        "toDir": "v",
+        "segments": 2,
+        "freeValues": []
+      },
+      {
+        "fromId": "injector-40",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "diverter-45",
+        "toRole": "branch",
+        "toDir": "v",
+        "segments": 2,
+        "freeValues": []
+      },
+      {
+        "fromId": "airlock-49",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "injector-52",
+        "toRole": "input2",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "airlock-50",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "injector-51",
+        "toRole": "input2",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "injector-51",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "injector-7",
+        "toRole": "input",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "injector-52",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "injector-17",
+        "toRole": "input",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "filter-54",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "injector-51",
+        "toRole": "input",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "filter-53",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "injector-52",
+        "toRole": "input",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "filter-55",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "injector-16",
+        "toRole": "input",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "injector-16",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "injector-8",
+        "toRole": "input",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "silo-46",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "valve-47",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "valve-47",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "trouserhopper-48",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "trouserhopper-48",
+        "fromRole": "output2",
+        "fromDir": "v",
+        "toId": "airlock-50",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "trouserhopper-48",
+        "fromRole": "output",
+        "fromDir": "v",
+        "toId": "airlock-49",
+        "toRole": "input",
+        "toDir": "v",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "injector-17",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "diverter-62",
+        "toRole": "branch",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "injector-8",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "diverter-63",
+        "toRole": "common",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "diverter-63",
+        "fromRole": "branch2",
+        "fromDir": "h",
+        "toId": "diverter-62",
+        "toRole": "branch2",
+        "toDir": "v",
+        "segments": 4,
+        "freeValues": [
+          0.707765317881004,
+          0.5
+        ]
+      },
+      {
+        "fromId": "injector-7",
+        "fromRole": "output",
+        "fromDir": "h",
+        "toId": "diverter-60",
+        "toRole": "branch2",
+        "toDir": "v",
+        "segments": 2,
+        "freeValues": []
+      },
+      {
+        "fromId": "diverter-63",
+        "fromRole": "branch",
+        "fromDir": "h",
+        "toId": "diverter-60",
+        "toRole": "branch",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "diverter-60",
+        "fromRole": "common",
+        "fromDir": "h",
+        "toId": "hopper-58",
+        "toRole": "input2",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "diverter-62",
+        "fromRole": "common",
+        "fromDir": "h",
+        "toId": "hopper-61",
+        "toRole": "input2",
+        "toDir": "h",
+        "segments": 3,
+        "freeValues": [
+          0.5
+        ]
+      },
+      {
+        "fromId": "diverter-44",
+        "fromRole": "common",
+        "fromDir": "v",
+        "toId": "hopper-64",
+        "toRole": "input2",
+        "toDir": "h",
+        "segments": 2,
+        "freeValues": []
+      },
+      {
+        "fromId": "diverter-45",
+        "fromRole": "common",
+        "fromDir": "v",
+        "toId": "hopper-65",
+        "toRole": "input2",
+        "toDir": "h",
+        "segments": 2,
+        "freeValues": []
+      }
+    ],
+    "elementCount": 65,
+    "process": {
+      "elements": {},
+      "lines": {}
+    }
+  }
+}
