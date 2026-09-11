@@ -1308,10 +1308,84 @@ select.process-field__input {
 }
 
 /* ---- Cronograma ---- */
-
+/* Una fila per bomba, totes compartint el mateix eix de temps. L'amplada de
+   la columna d'etiquetes és un token perquè el cursor, que travessa totes
+   les files, la pugui fer servir per situar-se. */
 .sim-timeline {
+  --sim-lane-label: 132px;
+  position: relative;
   flex: none;
+  max-height: 38%;
+  overflow-y: auto;
   padding: var(--space-3) var(--space-4) var(--space-2);
+  cursor: pointer;
+  touch-action: none;
+}
+
+.sim-timeline:focus-visible {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: -2px;
+}
+
+.sim-timeline__head,
+.sim-lane {
+  display: grid;
+  grid-template-columns: var(--sim-lane-label) minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.sim-timeline__lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* Etiqueta de la fila: nom de la bomba i com d'ocupada està. */
+.sim-lane__label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: 11px;
+}
+
+.sim-lane__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-text);
+  font-weight: 600;
+}
+
+.sim-lane__share {
+  flex: none;
+  color: var(--ui-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* La pista buida és el temps mort; els blocs, el temps de treball. Es
+   distingeixen d'un cop d'ull sense fer servir cap color nou. */
+.sim-lane__track {
+  position: relative;
+  height: 34px;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--radius-sm);
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--ui-sunken) 0 6px,
+    var(--ui-surface) 6px 12px
+  );
+  overflow: hidden;
+}
+
+/* Files sense bomba assignada: es veuen, però es veu que els falta alguna
+   cosa. */
+.sim-lane--orphan .sim-lane__name {
+  color: var(--ui-danger);
+  font-weight: 500;
+  font-style: italic;
 }
 
 .sim-timeline__ticks {
@@ -1330,29 +1404,6 @@ select.process-field__input {
   white-space: nowrap;
 }
 
-/* La pista sencera és la zona clicable: clicar-hi salta a aquell instant
-   i arrossegar-hi mou el cursor. */
-.sim-timeline__track {
-  position: relative;
-  height: 46px;
-  border: 1px solid var(--ui-border);
-  border-radius: var(--radius-md);
-  background: var(--ui-sunken);
-  cursor: pointer;
-  overflow: hidden;
-  touch-action: none;
-}
-
-.sim-timeline__track:focus-visible {
-  outline: 2px solid var(--ui-primary);
-  outline-offset: 2px;
-}
-
-.sim-timeline__blocks {
-  position: absolute;
-  inset: 0;
-}
-
 .sim-block {
   position: absolute;
   top: 0;
@@ -1362,17 +1413,21 @@ select.process-field__input {
   justify-content: center;
   overflow: hidden;
   padding: 0 var(--space-2);
-  border-left: 1px solid var(--ui-surface);
+  border: 1px solid var(--ui-primary);
+  border-radius: 3px;
   background: var(--ui-primary-soft);
   color: var(--ui-primary-dark);
   font-size: 11px;
-  line-height: 1.25;
+  line-height: 1.2;
   white-space: nowrap;
   pointer-events: none;
 }
 
-.sim-block:first-child {
-  border-left: none;
+/* Acció que xoca amb una altra: no es pot reproduir fins que no es mogui. */
+.sim-block--conflict {
+  border-color: var(--ui-danger);
+  background: var(--ui-danger-soft);
+  color: var(--ui-danger);
 }
 
 /* Les accions que no mouen producte es distingeixen sense fer servir cap
@@ -1409,10 +1464,12 @@ select.process-field__input {
   text-overflow: ellipsis;
 }
 
+/* El cursor travessa totes les files. Es col·loca a partir de l'amplada de
+   la columna d'etiquetes, que és la mateixa per a totes. */
 .sim-timeline__cursor {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: var(--space-3);
+  bottom: var(--space-2);
   width: 2px;
   margin-left: -1px;
   background: var(--ui-primary-dark);
@@ -1440,7 +1497,7 @@ select.process-field__input {
 .sim-columns {
   display: grid;
   grid-template-columns:
-    minmax(30rem, 2.4fr) minmax(10rem, 1fr) minmax(11rem, 1.05fr) minmax(12rem, 1.15fr);
+    minmax(38rem, 2.9fr) minmax(10rem, 1fr) minmax(11rem, 1.05fr) minmax(12rem, 1.15fr);
   gap: var(--space-4);
   flex: 1;
   min-height: 0;
@@ -1512,6 +1569,28 @@ select.process-field__input {
   background: var(--ui-primary-soft);
 }
 
+/* Acció que xoca amb una altra. */
+.sim-table tr.is-conflict td {
+  background: var(--ui-danger-soft);
+}
+
+/* Primer instant lliure on cabria: un clic i s'hi mou. */
+.sim-suggest {
+  padding: 1px var(--space-2);
+  border: 1px solid var(--ui-danger);
+  border-radius: var(--radius-sm);
+  background: var(--ui-surface);
+  color: var(--ui-danger);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sim-suggest:hover {
+  background: var(--ui-danger-soft);
+}
+
 .sim-row__order {
   width: 1.5rem;
   color: var(--ui-text-muted);
@@ -1534,7 +1613,7 @@ select.process-field__input {
 /* Per sota d'aquesta amplada la taula es desplaça de costat en comptes
    d'aixafar-ne les columnes. */
 .sim-table {
-  min-width: 30rem;
+  min-width: 38rem;
 }
 
 .sim-row__duration {
@@ -1603,30 +1682,55 @@ select.process-field__input {
 
 /* ---- Acció actual i estat del sistema ---- */
 
-.sim-facts {
+/* Accions en marxa en aquest instant: una targeta per cada una, perquè amb
+   diverses bombes n'hi pot haver més d'una alhora. */
+.sim-now {
   overflow-y: auto;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: var(--space-1) var(--space-3);
-  align-content: start;
-  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
   font-size: var(--size-small);
 }
 
-.sim-facts dt {
+.sim-now__card {
+  padding: var(--space-2);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--radius-sm);
+  background: var(--ui-sunken);
+}
+
+.sim-now__card--short {
+  border-color: var(--ui-danger);
+  background: var(--ui-danger-soft);
+}
+
+.sim-now__head {
+  margin: 0 0 var(--space-1);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sim-now__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.sim-now__label {
   color: var(--ui-text-muted);
   white-space: nowrap;
 }
 
-.sim-facts dd {
-  margin: 0;
-  color: var(--ui-text);
+.sim-now__value {
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.sim-facts dd.is-short {
+.sim-now__value.is-short {
   color: var(--ui-danger);
 }
 

@@ -21,6 +21,14 @@ const line = (name, throughput, storageId, consumptionId, extra = {}) => ({
   consumptionId,
   storageId,
   storageStatus: 'found',
+  pumps: ['Bomba de proves'],
+  // Recorregut propi per defecte: cada línia passa pels seus elements i per
+  // ningú més, o sigui que dues línies diferents no es trepitgen.
+  route: {
+    elements: [`pickup-${name}`, consumptionId],
+    connectors: [`pipe-${name}`],
+    labels: { [`pickup-${name}`]: `Injector de ${name}`, [consumptionId]: consumptionId },
+  },
   ...extra,
 });
 
@@ -31,12 +39,27 @@ function scenario(spec) {
     storages: spec.storages || {},
     consumptions: spec.consumptions || {},
     lines: spec.lines || {},
-    actions: ProcessModel.normalizeSequence(spec.actions || []),
+    pumps: spec.pumps || { P: { name: 'Bomba de proves' } },
+    actions: ProcessModel.normalizeSequence(
+      spec.parallel ? spec.actions || [] : inSeries(spec.actions || []),
+    ),
   };
 }
 
 const transport = (lineId, duration) => ({ type: 'transport', lineId, duration });
 const rest = (duration) => ({ type: 'rest', duration });
+
+// Encadena les accions una darrere l'altra, que és com anaven abans que hi
+// hagués cronograma en paral·lel. Les proves que no parlin de paral·lelisme
+// han de continuar donant exactament els mateixos números.
+function inSeries(actions, pumpId) {
+  let time = 0;
+  return actions.map((action) => {
+    const chained = { ...action, pumpId: pumpId || 'P', startTime: time };
+    time += action.duration;
+    return chained;
+  });
+}
 
 // Escenari base: un silo, una tolva i una línia. Els paràmetres canvien.
 function simple(quantity, throughput, actions, extra = {}) {
@@ -68,8 +91,8 @@ Test.case('a mig camí (5 min) n\'ha mogut exactament la meitat', () => {
   const half = SimulationEngine.stateAt(compiled, minutes(5));
   assert.equal(half.lines.L, 50, 'kg transferits');
   assert.equal(half.storages.S, 950, 'kg al silo');
-  assert.equal(half.action.progress, 0.5, 'progrés de l\'acció');
-  assert.equal(half.activeLineId, 'L', 'línia activa');
+  assert.equal(half.actions[0].progress, 0.5, 'progrés de l\'acció');
+  assert.deepEqual(half.activeLineIds, ['L'], 'línia activa');
 });
 
 // =====================================================================
@@ -94,8 +117,8 @@ Test.case('després de buidar-se, l\'acció ocupa el temps però no mou res', ()
   const compiled = SimulationEngine.compile(simple(50, 600, [transport('L', minutes(10))]));
   const later = SimulationEngine.stateAt(compiled, minutes(7));
   assert.equal(later.lines.L, 50, 'kg transferits al minut 7');
-  assert.equal(later.activeLineId, '', 'cap línia activa un cop buit');
-  assert.equal(later.action.order, 1, 'l\'acció encara és la 1');
+  assert.equal(later.activeLineIds.length, 0, 'cap línia activa un cop buit');
+  assert.equal(later.actions[0].order, 1, 'l\'acció encara és la 1');
 });
 
 // =====================================================================
@@ -128,8 +151,8 @@ Test.case('durant el descans no es mou res', () => {
   ]));
   const during = SimulationEngine.stateAt(compiled, minutes(6));
   assert.equal(during.lines.L, 25, 'kg transferits');
-  assert.equal(during.action.type, 'rest', 'tipus d\'acció');
-  assert.equal(during.activeLineId, '', 'cap línia activa');
+  assert.equal(during.actions[0].type, 'rest', 'tipus d\'acció');
+  assert.equal(during.activeLineIds.length, 0, 'cap línia activa');
 });
 
 // =====================================================================
@@ -225,8 +248,8 @@ Test.case('cada element porta el seu compte, sense barrejar-se', () => {
 Test.case('enmig de la segona acció, la primera línia ja no es mou', () => {
   const compiled = SimulationEngine.compile(multiScenario());
   const during = SimulationEngine.stateAt(compiled, minutes(20));   // dins de l'acció 2
-  assert.equal(during.action.order, 2, 'acció activa');
-  assert.equal(during.activeLineId, 'LB', 'línia activa');
+  assert.equal(during.actions[0].order, 2, 'acció activa');
+  assert.deepEqual(during.activeLineIds, ['LB'], 'línia activa');
   assert.equal(during.lines.LA, 100, 'la línia de farina es queda on era');
   assert.equal(during.lines.LB, 40, 'la de sucre porta 10 min a 240 kg/h');
   assert.equal(during.storages.SILO, 400, 'el silo no baixa mentre no és el seu torn');
@@ -550,6 +573,230 @@ Test.case('getSequence() retorna una còpia: tocar-la no toca el model', () => {
   const copy = ProcessModel.getSequence();
   copy[0].duration = 999;
   assert.equal(ProcessModel.getSequence()[0].duration, 300, 'durada al model');
+});
+
+// =====================================================================
+Test.group('Accions en paral·lel');
+
+Test.case('dues línies de bombes diferents transporten alhora', () => {
+  // 600 kg/h i 300 kg/h durant 10 min, cada una des del seu magatzem.
+  const compiled = SimulationEngine.compile(scenario({
+    parallel: true,
+    pumps: { A: { name: 'Bomba A' }, B: { name: 'Bomba B' } },
+    storages: {
+      SA: storage('Silo A', 'Farina', 1000),
+      SB: storage('Silo B', 'Sucre', 1000),
+    },
+    consumptions: {
+      CA: consumption('Consum A', 'Farina'),
+      CB: consumption('Consum B', 'Sucre'),
+    },
+    lines: {
+      LA: line('LA', 600, 'SA', 'CA'),
+      LB: line('LB', 300, 'SB', 'CB'),
+    },
+    actions: [
+      { type: 'transport', pumpId: 'A', lineId: 'LA', startTime: 0, duration: minutes(10) },
+      { type: 'transport', pumpId: 'B', lineId: 'LB', startTime: 0, duration: minutes(10) },
+    ],
+  }));
+
+  assert.isTrue(compiled.ok, 'la compilació');
+  assert.equal(compiled.totalDuration, minutes(10), 'durada total: van alhora, no seguides');
+
+  const end = SimulationEngine.stateAt(compiled, minutes(10));
+  assert.equal(end.storages.SA, 900, 'silo A');
+  assert.equal(end.storages.SB, 950, 'silo B');
+  assert.equal(end.consumptions.CA, 100, 'consum A');
+  assert.equal(end.consumptions.CB, 50, 'consum B');
+
+  const half = SimulationEngine.stateAt(compiled, minutes(5));
+  assert.equal(half.actions.length, 2, 'dues accions actives alhora');
+  assert.equal(half.activeLineIds.sort().join(','), 'LA,LB', 'dues línies movent producte');
+});
+
+Test.case('dues línies des del MATEIX magatzem el buiden amb la suma dels cabals', () => {
+  // 100 kg, dues línies de 600 kg/h alhora: la suma és 1.200 kg/h, o sigui
+  // que es buida en 100 / 1200 h = 5 minuts, no en 10.
+  const compiled = SimulationEngine.compile(scenario({
+    parallel: true,
+    pumps: { A: { name: 'Bomba A' }, B: { name: 'Bomba B' } },
+    storages: { S: storage('Silo compartit', 'Farina', 100) },
+    consumptions: {
+      C1: consumption('Consum 1', 'Farina'),
+      C2: consumption('Consum 2', 'Farina'),
+    },
+    lines: {
+      L1: line('L1', 600, 'S', 'C1'),
+      L2: line('L2', 600, 'S', 'C2'),
+    },
+    actions: [
+      { type: 'transport', pumpId: 'A', lineId: 'L1', startTime: 0, duration: minutes(10) },
+      { type: 'transport', pumpId: 'B', lineId: 'L2', startTime: 0, duration: minutes(10) },
+    ],
+  }));
+
+  assert.isTrue(compiled.ok, 'la compilació');
+  assert.isTrue(compiled.keyTimes.includes(300), 'el minut 5 és un moment clau');
+
+  const empty = SimulationEngine.stateAt(compiled, 300);
+  assert.equal(empty.storages.S, 0, 'el silo es buida al minut 5 clavat');
+  assert.equal(empty.consumptions.C1, 50, 'meitat per a cada línia');
+  assert.equal(empty.consumptions.C2, 50, 'meitat per a cada línia');
+  assert.isTrue(SimulationEngine.stateAt(compiled, 299).storages.S > 0, 'al minut 4:59 encara en queda');
+
+  // Totes dues s'aturen en aquell mateix instant.
+  const later = SimulationEngine.stateAt(compiled, minutes(9));
+  assert.equal(later.consumptions.C1, 50, 'després no arriba res més');
+  assert.equal(later.consumptions.C2, 50, 'després no arriba res més');
+  assert.equal(later.activeLineIds.length, 0, 'cap línia movent producte');
+
+  compiled.actions.forEach((action) => {
+    assert.isFalse(action.complete, `acció ${action.order} completa`);
+    assert.equal(action.transferred, 50, `acció ${action.order}: kg moguts`);
+  });
+});
+
+Test.case('cabals diferents des del mateix magatzem reparteixen en proporció', () => {
+  // 900 kg/h i 300 kg/h: la suma és 1.200 kg/h i 100 kg duren 5 minuts,
+  // dels quals 75 kg se'n van per la primera i 25 per la segona.
+  const compiled = SimulationEngine.compile(scenario({
+    parallel: true,
+    pumps: { A: { name: 'Bomba A' }, B: { name: 'Bomba B' } },
+    storages: { S: storage('Silo', 'Farina', 100) },
+    consumptions: { C1: consumption('Consum 1', 'Farina'), C2: consumption('Consum 2', 'Farina') },
+    lines: { L1: line('L1', 900, 'S', 'C1'), L2: line('L2', 300, 'S', 'C2') },
+    actions: [
+      { type: 'transport', pumpId: 'A', lineId: 'L1', startTime: 0, duration: minutes(10) },
+      { type: 'transport', pumpId: 'B', lineId: 'L2', startTime: 0, duration: minutes(10) },
+    ],
+  }));
+
+  const end = SimulationEngine.stateAt(compiled, minutes(10));
+  assert.equal(end.storages.S, 0, 'silo buit');
+  assert.close(end.consumptions.C1, 75, 1e-9, 'tres quartes parts');
+  assert.close(end.consumptions.C2, 25, 1e-9, 'una quarta part');
+  assert.close(end.consumptions.C1 + end.consumptions.C2, 100, 1e-9, 'i tot plegat, els 100 kg');
+});
+
+Test.case('accions que se solapen a mitges: els moments clau són tots', () => {
+  const compiled = SimulationEngine.compile(scenario({
+    parallel: true,
+    pumps: { A: { name: 'Bomba A' }, B: { name: 'Bomba B' } },
+    storages: { SA: storage('A', 'Farina', 1000), SB: storage('B', 'Sucre', 1000) },
+    consumptions: { CA: consumption('CA', 'Farina'), CB: consumption('CB', 'Sucre') },
+    lines: { LA: line('LA', 600, 'SA', 'CA'), LB: line('LB', 600, 'SB', 'CB') },
+    actions: [
+      { type: 'transport', pumpId: 'A', lineId: 'LA', startTime: 0, duration: minutes(10) },
+      { type: 'transport', pumpId: 'B', lineId: 'LB', startTime: minutes(6), duration: minutes(10) },
+    ],
+  }));
+
+  assert.equal(compiled.totalDuration, minutes(16), 'durada total');
+  assert.deepEqual(compiled.keyTimes, [0, 360, 600, 960], 'moments clau');
+
+  // Al minut 8 la primera porta 8 min i la segona 2.
+  const state = SimulationEngine.stateAt(compiled, minutes(8));
+  assert.equal(state.consumptions.CA, 80, 'la primera');
+  assert.equal(state.consumptions.CB, 20, 'la segona');
+});
+
+// =====================================================================
+Test.group('Conflictes entre accions simultànies');
+
+function conflictScenario(routeB, startB) {
+  return scenario({
+    parallel: true,
+    pumps: { A: { name: 'Bomba A' }, B: { name: 'Bomba B' } },
+    storages: { S: storage('Silo', 'Farina', 1000) },
+    consumptions: { C1: consumption('C1', 'Farina'), C2: consumption('C2', 'Farina') },
+    lines: {
+      LA: line('LA', 600, 'S', 'C1', {
+        route: { elements: ['inj-1', 'valve-1', 'C1'], connectors: [], labels: { 'valve-1': 'Vàlvula 1' } },
+      }),
+      LB: line('LB', 600, 'S', 'C2', { route: routeB }),
+    },
+    actions: [
+      { type: 'transport', pumpId: 'A', lineId: 'LA', startTime: 0, duration: minutes(10) },
+      { type: 'transport', pumpId: 'B', lineId: 'LB', startTime: startB, duration: minutes(10) },
+    ],
+  });
+}
+
+Test.case('recorreguts separats: poden anar alhora', () => {
+  const report = SimulationEngine.validate(conflictScenario(
+    { elements: ['inj-2', 'valve-2', 'C2'], connectors: [], labels: {} }, 0,
+  ));
+  assert.isTrue(report.ok, 'hauria de deixar simular');
+});
+
+Test.case('un element compartit: xoquen, i diu quin', () => {
+  const report = SimulationEngine.validate(conflictScenario(
+    { elements: ['inj-2', 'valve-1', 'C2'], connectors: [], labels: {} }, 0,
+  ));
+  assert.isFalse(report.ok, 'ha de bloquejar');
+  assert.hasCode(report.errors, 'pipe-conflict', 'errors');
+
+  const clash = report.errors.find((issue) => issue.code === 'pipe-conflict');
+  assert.isTrue(clash.message.includes('Vàlvula 1'), 'diu per on xoquen');
+  assert.isTrue(clash.message.includes('minut'), 'i quan');
+  assert.deepEqual(clash.sharedElementIds, ['valve-1'], 'element compartit');
+});
+
+Test.case('el mateix element però sense solapar-se en el temps: cap problema', () => {
+  const report = SimulationEngine.validate(conflictScenario(
+    { elements: ['inj-2', 'valve-1', 'C2'], connectors: [], labels: {} }, minutes(10),
+  ));
+  assert.isTrue(report.ok, 'tocar-se no és solapar-se');
+});
+
+Test.case('una bomba no pot fer dues coses alhora', () => {
+  const report = SimulationEngine.validate(scenario({
+    parallel: true,
+    pumps: { A: { name: 'Bomba A' } },
+    storages: { SA: storage('A', 'Farina', 1000), SB: storage('B', 'Farina', 1000) },
+    consumptions: { CA: consumption('CA', 'Farina'), CB: consumption('CB', 'Farina') },
+    lines: { LA: line('LA', 600, 'SA', 'CA'), LB: line('LB', 600, 'SB', 'CB') },
+    actions: [
+      { type: 'transport', pumpId: 'A', lineId: 'LA', startTime: 0, duration: minutes(10) },
+      { type: 'transport', pumpId: 'A', lineId: 'LB', startTime: minutes(5), duration: minutes(10) },
+    ],
+  }));
+
+  assert.isFalse(report.ok, 'ha de bloquejar');
+  assert.hasCode(report.errors, 'pump-conflict', 'errors');
+  assert.isTrue(report.errors[0].message.includes('Bomba A'), 'diu quina bomba');
+});
+
+Test.case('un descans no ocupa canonada i pot anar alhora que un transport', () => {
+  const report = SimulationEngine.validate(scenario({
+    parallel: true,
+    pumps: { A: { name: 'Bomba A' }, B: { name: 'Bomba B' } },
+    storages: { S: storage('Silo', 'Farina', 1000) },
+    consumptions: { C: consumption('C', 'Farina') },
+    lines: { L: line('L', 600, 'S', 'C') },
+    actions: [
+      { type: 'transport', pumpId: 'A', lineId: 'L', startTime: 0, duration: minutes(10) },
+      { type: 'rest', pumpId: 'B', startTime: 0, duration: minutes(10) },
+    ],
+  }));
+  assert.isTrue(report.ok, 'el descans no ocupa cap canonada');
+});
+
+Test.case('un barrido amb línia SÍ que ocupa canonada', () => {
+  const report = SimulationEngine.validate(scenario({
+    parallel: true,
+    pumps: { A: { name: 'Bomba A' }, B: { name: 'Bomba B' } },
+    storages: { S: storage('Silo', 'Farina', 1000) },
+    consumptions: { C: consumption('C', 'Farina') },
+    lines: { L: line('L', 600, 'S', 'C') },
+    actions: [
+      { type: 'transport', pumpId: 'A', lineId: 'L', startTime: 0, duration: minutes(10) },
+      { type: 'sweep', pumpId: 'B', lineId: 'L', startTime: minutes(2), duration: minutes(3) },
+    ],
+  }));
+  assert.isFalse(report.ok, 'la mateixa línia no pot fer dues coses alhora');
+  assert.hasCode(report.errors, 'pipe-conflict', 'errors');
 });
 
 Test.run();

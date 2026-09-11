@@ -79,13 +79,20 @@ const ProcessModel = (() => {
   // Una seqüència és una llista ORDENADA d'accions que s'executen una
   // darrere l'altra, sense solapaments: només n'hi ha una d'activa alhora.
   //
-  // Cada acció és { order, type, lineId, duration }:
-  //   · `order`    posició dins la seqüència, 1, 2, 3...
-  //   · `type`     un dels ACTION_TYPES.
-  //   · `lineId`   la línia de transport (la seva signatura, vegeu
-  //                lineSignature). Obligatòria a les accions de transport.
-  //   · `duration` en SEGONS, sempre més gran que 0. A la pantalla es
-  //                veurà en minuts; el model no arrodoneix mai.
+  // Cada acció és { order, type, pumpId, lineId, startTime, duration }:
+  //   · `order`     posició dins la llista, 1, 2, 3... Es renumera sola.
+  //   · `type`      un dels ACTION_TYPES.
+  //   · `pumpId`    la bomba que la fa. Una bomba no pot fer dues coses
+  //                 alhora. Buit vol dir "cap bomba assignada", que té la
+  //                 seva pròpia fila al cronograma.
+  //   · `lineId`    la línia de transport (la seva signatura, vegeu
+  //                 lineSignature). Obligatòria al transport, opcional al
+  //                 barrido, ignorada a la resta.
+  //   · `startTime` en SEGONS des del començament. Diverses accions poden
+  //                 solapar-se, sempre que siguin de bombes diferents i no
+  //                 comparteixin canonada (vegeu docs/SIMULATION.md).
+  //   · `duration`  en SEGONS, sempre més gran que 0. A la pantalla tots dos
+  //                 temps es veuen en minuts; el model no arrodoneix mai.
   //
   // Qui executa tot això és SimulationEngine (simulation.js); aquí només hi
   // viuen les dades.
@@ -110,24 +117,38 @@ const ProcessModel = (() => {
 
   function createAction(values) {
     const source = values || {};
+    // Un arxiu d'abans del cronograma en paral·lel no porta instant
+    // d'inici. Es deixa a null, i qui obre l'arxiu el converteix encadenant
+    // les accions (vegeu migrateSequenceToLanes a script.js).
+    const hasStart = source.startTime !== undefined && source.startTime !== null
+      && Number.isFinite(Number(source.startTime));
+
     return {
       order: Number(source.order) || 0,
       type: source.type || ACTION_TYPES.TRANSPORT,
+      pumpId: source.pumpId || '',
       lineId: source.lineId || '',
+      startTime: hasStart ? Number(source.startTime) : null,
       duration: Number(source.duration) || 0,
     };
   }
 
-  // Renumera l'ordre 1..n a partir de la posició real a la llista, de
-  // manera que l'ordre no pugui quedar mai desparellat amb la seqüència.
-  // No valida res: de dir què està malament se n'encarrega el motor, que
-  // és qui sap donar el missatge sencer.
+  // Ordena per instant d'inici (i, en cas d'empat, per bomba) i renumera
+  // l'ordre 1..n, de manera que el número d'una acció sempre correspongui a
+  // la seva posició al cronograma. No valida res: de dir què està malament
+  // se n'encarrega el motor, que és qui sap donar el missatge sencer.
   function normalizeSequence(actions) {
-    return (Array.isArray(actions) ? actions : []).map((action, index) => {
-      const normalized = createAction(action);
-      normalized.order = index + 1;
-      return normalized;
-    });
+    return (Array.isArray(actions) ? actions : [])
+      .map((action, index) => ({ action: createAction(action), index }))
+      .sort((a, b) => (
+        (a.action.startTime || 0) - (b.action.startTime || 0)
+        || a.action.pumpId.localeCompare(b.action.pumpId)
+        || a.index - b.index
+      ))
+      .map((entry, index) => {
+        entry.action.order = index + 1;
+        return entry.action;
+      });
   }
 
   // ---- Magatzem ----

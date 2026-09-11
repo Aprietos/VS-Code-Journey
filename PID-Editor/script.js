@@ -3413,6 +3413,10 @@ function applyModelFile(text) {
     applyViewport();
   }
 
+  // Una seqüència d'abans del cronograma en paral·lel es converteix aquí,
+  // un sol cop, en obrir l'arxiu (vegeu migrateSequenceToLanes).
+  migrateSequenceToLanes();
+
   // Obrir un model és una acció més: es pot desfer i es torna al que hi
   // havia abans al canvas.
   pushHistory();
@@ -3588,7 +3592,7 @@ const simClock = document.getElementById('sim-clock');
 const simIssues = document.getElementById('sim-issues');
 const simTicks = document.getElementById('sim-ticks');
 const simTrack = document.getElementById('sim-track');
-const simBlocksHost = document.getElementById('sim-blocks');
+const simLanesHost = document.getElementById('sim-lanes');
 const simCursor = document.getElementById('sim-cursor');
 const simRows = document.getElementById('sim-rows');
 const simEmpty = document.getElementById('sim-empty');
@@ -3653,6 +3657,7 @@ function buildSimulationScenario() {
     storages: {},
     consumptions: {},
     lines: {},
+    pumps: {},
     actions: ProcessModel.getSequence(),
   };
 
@@ -3670,6 +3675,13 @@ function buildSimulationScenario() {
       ...ProcessModel.getElement(id, ROLE_CONSUMPTION),
       name: elementDisplayName(element),
     };
+  });
+
+  // Les bombes: el cronograma en fa una fila a cadascuna i el motor les
+  // necessita per saber quina acció ocupa quina bomba.
+  const pumps = detectPumps(buildTopology());
+  Object.keys(pumps).forEach((id) => {
+    scenario.pumps[id] = { name: pumps[id].name, mode: pumps[id].mode };
   });
 
   const graph = buildProcessGraph();
@@ -3700,10 +3712,53 @@ function buildSimulationScenario() {
       consumptionId: line.consumptionPointId,
       storageId: source.storageId,
       storageStatus: source.status,
+      pumpIds: line.pumpIds || [],
+      // El recorregut és el que permet al motor saber si dues accions
+      // simultànies es trepitgen la canonada. Els noms van amb ell perquè
+      // el missatge del conflicte pugui dir per on passen totes dues.
+      route: {
+        elements: [...line.pathElementIds],
+        connectors: [...line.pathConnectorIds],
+        labels: line.pathElementIds.reduce((labels, id) => {
+          labels[id] = processElementName(id);
+          return labels;
+        }, {}),
+      },
     };
   });
 
   return scenario;
+}
+
+// ---- Compatibilitat amb les seqüències d'abans del paral·lel ----
+// Les accions antigues no porten ni bomba ni instant d'inici: anaven totes
+// en sèrie, una darrere l'altra. En obrir un arxiu així es converteixen
+// encadenant-les en el temps (que és exactament com es reproduïen) i
+// assignant cada una a la primera bomba que pot fer funcionar la seva
+// línia. Les que no en tenen cap es queden a la fila "sense bomba", que es
+// veu al cronograma i es pot arreglar a mà.
+function migrateSequenceToLanes() {
+  const actions = ProcessModel.getSequence();
+  if (!actions.some((action) => action.startTime === null)) return false;
+
+  const pumpForLine = {};
+  findTransportLines().lines.forEach((line) => {
+    pumpForLine[ProcessModel.lineSignature(line)] = (line.pumpIds && line.pumpIds[0]) || '';
+  });
+
+  let time = 0;
+  const migrated = actions.map((action) => {
+    const converted = {
+      ...action,
+      startTime: action.startTime === null ? time : action.startTime,
+      pumpId: action.pumpId || pumpForLine[action.lineId] || '',
+    };
+    time = converted.startTime + action.duration;
+    return converted;
+  });
+
+  ProcessModel.setSequence(migrated);
+  return true;
 }
 
 // Per què una línia no es pot fer servir. Es pregunta AL MOTOR, validant
@@ -3714,6 +3769,77 @@ function simLineProblems(lineId) {
   if (!simScenario || !lineId || !simScenario.lines[lineId]) return [];
   const probe = { ...simScenario, actions: [{ order: 1, type: 'transport', lineId, duration: 60 }] };
   return SimulationEngine.validate(probe).errors.filter((issue) => issue.lineId === lineId);
+}
+
+// ---- Files del cronograma ----
+// Una fila per bomba, més una per a les accions que no en tenen cap
+// assignada (només si n'hi ha). Ordenades pel nom, que és com es llegeixen.
+function simLanes() {
+  if (!simScenario) return [];
+
+  const lanes = Object.keys(simScenario.pumps)
+    .sort((a, b) => simScenario.pumps[a].name.localeCompare(simScenario.pumps[b].name, 'ca'))
+    .map((id) => ({ id, name: simScenario.pumps[id].name }));
+
+  const orphan = simScenario.actions.some(
+    (action) => !action.pumpId || !simScenario.pumps[action.pumpId],
+  );
+  if (orphan) lanes.push({ id: '', name: 'Sense bomba', orphan: true });
+
+  return lanes;
+}
+
+// Durada del cronograma. Quan la compilació falla (per exemple perquè hi ha
+// conflictes) el motor no en dona cap, però el cronograma s'ha de poder
+// dibuixar igualment: és justament on s'han de veure marcats els xocs.
+function simTimelineDuration() {
+  if (simCompiled && simCompiled.ok) return simCompiled.totalDuration;
+  return (simScenario ? simScenario.actions : [])
+    .reduce((max, action) => Math.max(max, (action.startTime || 0) + action.duration), 0);
+}
+
+// Accions que ara mateix xoquen amb alguna altra, per marcar-les.
+function simConflictingOrders() {
+  const orders = new Set();
+  if (!simCompiled) return orders;
+
+  simCompiled.errors.forEach((issue) => {
+    if (issue.code !== 'pump-conflict' && issue.code !== 'pipe-conflict') return;
+    orders.add(issue.actionOrder);
+    orders.add(issue.otherOrder);
+  });
+
+  return orders;
+}
+
+// Primer instant en què una acció cabria sense xocar amb cap altra. Es
+// proven el zero i els finals de la resta d'accions, que són els únics
+// instants on es pot obrir un forat.
+function suggestFreeStart(index) {
+  const actions = ProcessModel.getSequence();
+  const target = actions[index];
+  if (!target || !simScenario) return null;
+
+  const candidates = [...new Set([0, ...actions
+    .filter((_, i) => i !== index)
+    .map((action) => (action.startTime || 0) + action.duration)])]
+    .sort((a, b) => a - b);
+
+  for (let i = 0; i < candidates.length; i += 1) {
+    const probe = actions.map((action, j) => (
+      j === index ? { ...action, startTime: candidates[i] } : action
+    ));
+
+    const clashes = SimulationEngine.validate({ ...simScenario, actions: probe }).errors
+      .some((issue) => (
+        (issue.code === 'pump-conflict' || issue.code === 'pipe-conflict')
+        && (issue.actionOrder === target.order || issue.otherOrder === target.order)
+      ));
+
+    if (!clashes) return candidates[i];
+  }
+
+  return null;
 }
 
 // ---- Compilació ----
@@ -3873,24 +3999,61 @@ function simIconButton(iconId, label, disabled, onClick) {
   return button;
 }
 
+// Camp numèric en minuts que desa en segons.
+function simMinutesField(seconds, onChange) {
+  const wrap = document.createElement('div');
+  wrap.className = 'sim-row__duration';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.inputMode = 'decimal';
+  input.className = 'process-field__input';
+  input.value = String(Math.round((seconds / 60) * 1000) / 1000);
+  input.addEventListener('change', () => {
+    const minutes = ProcessModel.parseNumber(input.value);
+    onChange(minutes === null ? 0 : minutes * 60);
+  });
+
+  const unit = document.createElement('span');
+  unit.className = 'sim-row__unit';
+  unit.textContent = 'min';
+
+  wrap.append(input, unit);
+  return wrap;
+}
+
 function renderSimSequence() {
   const actions = ProcessModel.getSequence();
   const transport = ProcessModel.ACTION_TYPES.TRANSPORT;
+  const sweep = ProcessModel.ACTION_TYPES.SWEEP;
+  const conflicts = simConflictingOrders();
 
   simRows.replaceChildren();
   simEmpty.hidden = actions.length > 0;
-  simTotal.textContent = `Total ${formatClock(actions.reduce((sum, a) => sum + a.duration, 0))}`;
+  simTotal.textContent = `Total ${formatClock(simTimelineDuration())}`;
 
-  const sweep = ProcessModel.ACTION_TYPES.SWEEP;
   const typeOptions = Object.values(ProcessModel.ACTION_TYPES)
     .map((type) => ({ value: type, label: actionLabel(type) }));
 
+  const pumpOptions = [{ value: '', label: '— Sense bomba —' }].concat(
+    simLanes().filter((lane) => lane.id).map((lane) => ({ value: lane.id, label: lane.name })),
+  );
+
   actions.forEach((action, index) => {
     const row = document.createElement('tr');
+    if (conflicts.has(action.order)) row.classList.add('is-conflict');
 
     const order = document.createElement('td');
     order.className = 'sim-row__order';
     order.textContent = String(action.order);
+
+    // Bomba: és qui fa l'acció, i la seva fila al cronograma.
+    const pumpCell = document.createElement('td');
+    pumpCell.appendChild(simSelect(action.pumpId, pumpOptions, (value) => {
+      const next = ProcessModel.getSequence();
+      next[index].pumpId = value;
+      commitSequence(next);
+    }));
 
     const type = document.createElement('td');
     type.appendChild(simSelect(action.type, typeOptions, (value) => {
@@ -3909,6 +4072,13 @@ function renderSimSequence() {
       const options = [{ value: '', label: optional ? '— Sense línia —' : '— Tria una línia —' }];
 
       Object.keys(simScenario ? simScenario.lines : {}).forEach((id) => {
+        const line = simScenario.lines[id];
+
+        // Només es poden triar les línies que la bomba d'aquesta acció pot
+        // fer funcionar. Sense bomba assignada no hi ha res a filtrar.
+        const drivable = !action.pumpId || (line.pumpIds || []).includes(action.pumpId);
+        if (!drivable && id !== action.lineId) return;
+
         const problems = optional ? [] : simLineProblems(id);
         options.push({
           value: id,
@@ -3930,32 +4100,60 @@ function renderSimSequence() {
       lineCell.className = 'sim-row__unit';
     }
 
-    // Durada: s'escriu en minuts i es desa en segons.
-    const durationCell = document.createElement('td');
-    const duration = document.createElement('div');
-    duration.className = 'sim-row__duration';
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.inputMode = 'decimal';
-    input.className = 'process-field__input';
-    input.value = String(action.duration / 60);
-    input.addEventListener('change', () => {
-      const minutes = ProcessModel.parseNumber(input.value);
+    // Inici i durada: tots dos s'escriuen en minuts i es desen en segons.
+    const startCell = document.createElement('td');
+    startCell.appendChild(simMinutesField(action.startTime || 0, (seconds) => {
       const next = ProcessModel.getSequence();
-      next[index].duration = minutes === null ? 0 : minutes * 60;
+      next[index].startTime = Math.max(0, seconds);
       commitSequence(next);
-    });
-    const unit = document.createElement('span');
-    unit.className = 'sim-row__unit';
-    unit.textContent = 'min';
-    duration.append(input, unit);
-    durationCell.appendChild(duration);
+    }));
+
+    const durationCell = document.createElement('td');
+    durationCell.appendChild(simMinutesField(action.duration, (seconds) => {
+      const next = ProcessModel.getSequence();
+      const delta = seconds - next[index].duration;
+      const pumpId = next[index].pumpId || '';
+      const after = (next[index].startTime || 0) + next[index].duration;
+      next[index].duration = seconds;
+
+      // Allargar o escurçar una acció desplaça les que vinguin DESPRÉS a la
+      // mateixa bomba, conservant els forats que hi hagi. Si no, allargar-ne
+      // una xocaria de seguida amb la següent, i no és això el que es vol
+      // dir quan només es canvia una durada.
+      next.forEach((other, i) => {
+        if (i === index) return;
+        if ((other.pumpId || '') !== pumpId) return;
+        if ((other.startTime || 0) < after) return;
+        other.startTime = Math.max(0, (other.startTime || 0) + delta);
+      });
+
+      commitSequence(next);
+    }));
 
     // Estimació: el que diu el motor per a aquesta acció, no un càlcul fet
     // aquí. Si la línia té algun problema, hi va el motiu.
     const estimate = document.createElement('td');
     estimate.className = 'sim-row__estimate';
-    if (action.type === sweep) {
+
+    if (conflicts.has(action.order)) {
+      estimate.classList.add('sim-row__estimate--short');
+      estimate.textContent = 'Xoca amb una altra acció. ';
+
+      const free = suggestFreeStart(index);
+      if (free !== null) {
+        const move = document.createElement('button');
+        move.type = 'button';
+        move.className = 'sim-suggest';
+        move.textContent = `Mou-la al minut ${Math.round((free / 60) * 100) / 100}`;
+        move.title = 'Primer instant en què hi cabria sense xocar amb res';
+        move.addEventListener('click', () => {
+          const next = ProcessModel.getSequence();
+          next[index].startTime = free;
+          commitSequence(next);
+        });
+        estimate.appendChild(move);
+      }
+    } else if (action.type === sweep) {
       estimate.textContent = action.lineId ? 'Neteja · no mou producte' : '—';
     } else if (action.type !== transport) {
       estimate.textContent = '—';
@@ -3984,106 +4182,186 @@ function renderSimSequence() {
       }
     }
 
+    // Ja no hi ha fletxes d'ordenar: amb instants d'inici de debò, moure
+    // una acció és canviar-li l'hora o la bomba, i la llista es reordena
+    // sola pel cronograma.
     const buttons = document.createElement('td');
     buttons.className = 'sim-row__actions';
-    buttons.append(
-      simIconButton('i-up', 'Puja', index === 0, () => {
-        const next = ProcessModel.getSequence();
-        [next[index - 1], next[index]] = [next[index], next[index - 1]];
-        commitSequence(next);
-      }),
-      simIconButton('i-down', 'Baixa', index === actions.length - 1, () => {
-        const next = ProcessModel.getSequence();
-        [next[index], next[index + 1]] = [next[index + 1], next[index]];
-        commitSequence(next);
-      }),
-      simIconButton('i-trash', 'Elimina', false, () => {
-        const next = ProcessModel.getSequence();
-        next.splice(index, 1);
-        commitSequence(next);
-      }),
-    );
-    buttons.querySelector('.sim-icon-btn:last-child').classList.add('sim-icon-btn--danger');
+    buttons.appendChild(simIconButton('i-trash', 'Elimina', false, () => {
+      const next = ProcessModel.getSequence();
+      next.splice(index, 1);
+      commitSequence(next);
+    }));
+    buttons.querySelector('.sim-icon-btn').classList.add('sim-icon-btn--danger');
 
-    row.append(order, type, lineCell, durationCell, estimate, buttons);
+    row.append(order, pumpCell, type, lineCell, startCell, durationCell, estimate, buttons);
     simRows.appendChild(row);
   });
 }
 
 // ---- Cronograma ----
+// Una fila per bomba, totes compartint el mateix eix de temps. Els blocs
+// surten de la seqüència i no de la compilació: així el cronograma es
+// dibuixa igualment quan hi ha conflictes, que és justament quan cal
+// veure'ls marcats.
 function renderSimTimeline() {
-  simBlocksHost.replaceChildren();
+  simLanesHost.replaceChildren();
   simTicks.replaceChildren();
 
-  const total = simCompiled && simCompiled.ok ? simCompiled.totalDuration : 0;
+  const total = simTimelineDuration();
   simTrack.setAttribute('aria-valuemax', String(Math.round(total)));
   if (!total) {
-    simCursor.style.left = '0%';
+    simCursor.style.left = 'var(--sim-lane-label)';
     return;
   }
 
-  simCompiled.actions.forEach((action) => {
-    const block = document.createElement('div');
-    block.className = 'sim-block';
-    if (action.type === ProcessModel.ACTION_TYPES.SWEEP && action.lineId) {
-      block.classList.add('sim-block--sweep');
-    } else if (!action.moving) block.classList.add('sim-block--idle');
-    else if (!action.complete) block.classList.add('sim-block--short');
-    block.style.left = `${(action.startTime / total) * 100}%`;
-    block.style.width = `${(action.duration / total) * 100}%`;
+  const actions = simScenario ? simScenario.actions : [];
+  const conflicts = simConflictingOrders();
+  const computed = {};
+  if (simCompiled && simCompiled.ok) {
+    simCompiled.actions.forEach((action) => { computed[action.order] = action; });
+  }
+
+  simLanes().forEach((lane) => {
+    const own = actions.filter((action) => {
+      const pumpId = simScenario.pumps[action.pumpId] ? action.pumpId : '';
+      return pumpId === lane.id;
+    });
+
+    const busy = own.reduce((sum, action) => sum + action.duration, 0);
+    const occupancy = total > 0 ? Math.round((busy / total) * 100) : 0;
+
+    const row = document.createElement('div');
+    row.className = 'sim-lane';
+    if (lane.orphan) row.classList.add('sim-lane--orphan');
+
+    const label = document.createElement('span');
+    label.className = 'sim-lane__label';
 
     const name = document.createElement('span');
-    name.className = 'sim-block__name';
-    name.textContent = actionLabel(action.type);
+    name.className = 'sim-lane__name';
+    name.textContent = lane.name;
+    name.title = lane.name;
 
-    const line = document.createElement('span');
-    line.className = 'sim-block__line';
-    line.textContent = action.lineId ? simLineName(action.lineId) : '—';
+    // Com d'ocupada està la bomba durant tota l'operació.
+    const share = document.createElement('span');
+    share.className = 'sim-lane__share';
+    share.textContent = `${occupancy} %`;
+    share.title = `Treballa ${formatClock(busy)} de ${formatClock(total)}`;
 
-    block.append(name, line);
-    simBlocksHost.appendChild(block);
+    label.append(name, share);
+
+    const track = document.createElement('div');
+    track.className = 'sim-lane__track';
+
+    own.forEach((action) => {
+      const result = computed[action.order];
+      const block = document.createElement('div');
+      block.className = 'sim-block';
+
+      if (conflicts.has(action.order)) block.classList.add('sim-block--conflict');
+      else if (action.type === ProcessModel.ACTION_TYPES.SWEEP && action.lineId) {
+        block.classList.add('sim-block--sweep');
+      } else if (result && !result.moving) block.classList.add('sim-block--idle');
+      else if (result && !result.complete) block.classList.add('sim-block--short');
+      else if (!result && !MOVES_PRODUCT_TYPES.has(action.type)) block.classList.add('sim-block--idle');
+
+      block.style.left = `${((action.startTime || 0) / total) * 100}%`;
+      block.style.width = `${(action.duration / total) * 100}%`;
+      block.title = `${actionLabel(action.type)}${action.lineId ? ` · ${simLineName(action.lineId)}` : ''}`
+        + ` · del minut ${Math.round(((action.startTime || 0) / 60) * 100) / 100}`
+        + ` al ${Math.round((((action.startTime || 0) + action.duration) / 60) * 100) / 100}`;
+
+      const what = document.createElement('span');
+      what.className = 'sim-block__name';
+      what.textContent = actionLabel(action.type);
+
+      const which = document.createElement('span');
+      which.className = 'sim-block__line';
+      which.textContent = action.lineId ? simLineName(action.lineId) : '—';
+
+      block.append(what, which);
+      track.appendChild(block);
+    });
+
+    row.append(label, track);
+    simLanesHost.appendChild(row);
   });
 
   // Marques de temps a les fronteres de les accions, saltant-se les que
   // caurien massa a prop de l'anterior perquè no s'encavalquin.
   let last = -Infinity;
-  [0, ...simCompiled.actions.map((action) => action.endTime)].forEach((seconds) => {
+  const moments = [...new Set([0, total, ...actions.map((a) => (a.startTime || 0) + a.duration)])]
+    .sort((a, b) => a - b);
+
+  moments.forEach((seconds) => {
     const ratio = seconds / total;
-    if (ratio - last < 0.07 && seconds !== total) return;
+    if (ratio - last < 0.08 && seconds !== total) return;
     last = ratio;
 
     const tick = document.createElement('span');
     tick.className = 'sim-timeline__tick';
     tick.style.left = `${ratio * 100}%`;
-    tick.textContent = `${Math.round(seconds / 60)} min`;
+    tick.textContent = `${Math.round((seconds / 60) * 10) / 10} min`;
     simTicks.appendChild(tick);
   });
 }
 
+// Els tipus que mouen producte, per poder pintar els blocs abans que el
+// motor hagi compilat res.
+const MOVES_PRODUCT_TYPES = new Set([ProcessModel.ACTION_TYPES.TRANSPORT]);
+
 // ---- Acció actual i estat del sistema ----
 // L'estructura es construeix un sol cop (aquí) i el bucle només canvia els
 // textos, de manera que reproduir no reconstrueix DOM contínuament.
-const SIM_FACTS = [
-  ['action', 'Acció'],
-  ['line', 'Línia'],
-  ['time', 'Temps'],
-  ['status', 'Estat'],
-  ['product', 'Producte'],
-  ['throughput', 'Rendiment'],
-  ['moved', 'Transferits'],
-];
+// Una targeta per cada acció activa en aquest instant. L'estructura es
+// refà només quan canvia QUINES accions hi ha; mentre són les mateixes,
+// el bucle només en canvia els textos.
+let simNowKey = '';
 
-function buildSimFactsShell() {
+function simNowRow(label, className) {
+  const row = document.createElement('div');
+  row.className = className || 'sim-now__row';
+
+  const name = document.createElement('span');
+  name.className = 'sim-now__label';
+  name.textContent = label;
+
+  const value = document.createElement('span');
+  value.className = 'sim-now__value';
+  value.textContent = '—';
+
+  row.append(name, value);
+  return { row, value };
+}
+
+function buildSimNowShell(actions) {
   simFactsList.replaceChildren();
   simFactNodes = {};
 
-  SIM_FACTS.forEach(([key, label]) => {
-    const term = document.createElement('dt');
-    term.textContent = label;
-    const value = document.createElement('dd');
-    value.textContent = '—';
-    simFactNodes[key] = value;
-    simFactsList.append(term, value);
+  if (!actions.length) {
+    const empty = document.createElement('p');
+    empty.className = 'sim-hint';
+    empty.textContent = 'Cap acció en marxa en aquest instant.';
+    simFactsList.appendChild(empty);
+    return;
+  }
+
+  actions.forEach((action) => {
+    const card = document.createElement('div');
+    card.className = 'sim-now__card';
+
+    const head = document.createElement('p');
+    head.className = 'sim-now__head';
+    card.appendChild(head);
+
+    const time = simNowRow('Temps');
+    const line = simNowRow('Línia');
+    const moved = simNowRow('Transferits');
+    card.append(time.row, line.row, moved.row);
+
+    simFactNodes[action.order] = { head, time: time.value, line: line.value, moved: moved.value, card };
+    simFactsList.appendChild(card);
   });
 }
 
@@ -4134,13 +4412,20 @@ function buildSimStateShell() {
 // escriu els textos; no calcula res.
 function renderSimNow() {
   const total = simCompiled ? simCompiled.totalDuration : 0;
+  const shown = simTimelineDuration();
   simClock.textContent = `${formatClock(simTime)} / ${formatClock(total)}`;
-  simCursor.style.left = total ? `${(simTime / total) * 100}%` : '0%';
+  // El cursor arrenca on comencen les pistes, després de les etiquetes.
+  simCursor.style.left = shown
+    ? `calc(${SIM_LANE_LABEL + 24}px + ${(simTime / shown)} * (100% - ${SIM_LANE_LABEL + 40}px))`
+    : `${SIM_LANE_LABEL + 24}px`;
   simTrack.setAttribute('aria-valuenow', String(Math.round(simTime)));
   simTrack.setAttribute('aria-valuetext', `${formatClock(simTime)} de ${formatClock(total)}`);
 
   if (!simCompiled || !simCompiled.ok) {
-    Object.values(simFactNodes).forEach((node) => { node.textContent = '—'; });
+    if (simNowKey !== 'none') {
+      buildSimNowShell([]);
+      simNowKey = 'none';
+    }
     Object.values(simValueNodes).forEach((bucket) => {
       Object.values(bucket).forEach((node) => { node.textContent = '—'; });
     });
@@ -4150,29 +4435,36 @@ function renderSimNow() {
   }
 
   const state = SimulationEngine.stateAt(simCompiled, simTime);
-  const action = state.action;
-  const line = action && action.lineId ? simScenario.lines[action.lineId] : null;
-  const storage = line ? simScenario.storages[line.storageId] : null;
 
-  simFactNodes.action.textContent = action ? `${action.order}. ${actionLabel(action.type)}` : '—';
-  simFactNodes.line.textContent = line ? line.name : '—';
-  simFactNodes.time.textContent = action
-    ? `${formatClock(simTime - action.startTime)} / ${formatClock(action.duration)}`
-    : '—';
+  // Les accions actives: la llista es refà només quan en canvia el conjunt.
+  const key = state.actions.map((item) => item.order).join(',');
+  if (key !== simNowKey) {
+    buildSimNowShell(state.actions);
+    simNowKey = key;
+  }
 
-  let status = 'Aturada';
-  if (state.finished) status = 'Acabada';
-  else if (simPlaying) status = 'En marxa';
-  else if (simTime > 0) status = 'En pausa';
-  if (action && !action.complete) status += ' · incompleta';
-  simFactNodes.status.textContent = status;
-  simFactNodes.status.classList.toggle('is-short', Boolean(action && !action.complete));
+  state.actions.forEach((item) => {
+    const nodes = simFactNodes[item.order];
+    if (!nodes) return;
 
-  simFactNodes.product.textContent = storage && storage.product ? storage.product : '—';
-  simFactNodes.throughput.textContent = line ? `${line.throughput} kg/h` : '—';
-  simFactNodes.moved.textContent = action && action.lineId
-    ? `${ProcessModel.formatKg(state.lines[action.lineId])} kg`
-    : '—';
+    const itemLine = item.lineId ? simScenario.lines[item.lineId] : null;
+    const pump = simScenario.pumps[item.pumpId];
+
+    nodes.head.textContent = `${item.order}. ${actionLabel(item.type)}`
+      + (pump ? ` · ${pump.name}` : '');
+    nodes.time.textContent = `${formatClock(simTime - item.startTime)} / ${formatClock(item.duration)}`;
+    nodes.line.textContent = itemLine
+      ? `${itemLine.name}${itemLine.throughput ? ` · ${itemLine.throughput} kg/h` : ''}`
+      : '—';
+    nodes.moved.textContent = item.lineId
+      ? `${ProcessModel.formatKg(state.lines[item.lineId])} kg`
+      : '—';
+
+    // Una acció activa que ja no mou res és que s'ha quedat sense magatzem.
+    const stalled = MOVES_PRODUCT_TYPES.has(item.type) && !item.moving;
+    nodes.card.classList.toggle('sim-now__card--short', stalled);
+    nodes.moved.classList.toggle('is-short', stalled);
+  });
 
   Object.keys(simValueNodes.storages).forEach((id) => {
     simValueNodes.storages[id].textContent = `${ProcessModel.formatKg(state.storages[id])} kg`;
@@ -4185,9 +4477,10 @@ function renderSimNow() {
     node.classList.toggle('is-over', capacity > 0 && state.consumptions[id] > capacity);
   });
 
-  // Fila de la seqüència que s'està reproduint.
+  // Files de la seqüència que s'estan reproduint ara mateix.
+  const running = new Set(state.actions.map((item) => item.order));
   [...simRows.children].forEach((row, index) => {
-    row.classList.toggle('is-current', Boolean(action) && index === action.order - 1);
+    row.classList.toggle('is-current', running.has(index + 1));
   });
 
   renderSimVisuals(state);
@@ -4196,10 +4489,18 @@ function renderSimNow() {
 
 // ---- Cursor arrossegable ----
 // Arrossegar només consulta la compilació que ja hi ha: no en refà cap.
+// Amplada de la columna d'etiquetes del cronograma, en píxels. Ha de
+// coincidir amb --sim-lane-label de styles.css: és el que fa que el cursor
+// i les pistes de totes les files estiguin alineats.
+const SIM_LANE_LABEL = 132;
+
 function simTimeFromPointer(clientX) {
   const rect = simTrack.getBoundingClientRect();
-  const ratio = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
-  return ratio * (simCompiled ? simCompiled.totalDuration : 0);
+  // Les pistes comencen després de les etiquetes i del seu espai.
+  const left = rect.left + 16 + SIM_LANE_LABEL + 8;
+  const width = Math.max(1, rect.right - 16 - left);
+  const ratio = Math.min(Math.max((clientX - left) / width, 0), 1);
+  return ratio * simTimelineDuration();
 }
 
 simTrack.addEventListener('pointerdown', (event) => {
@@ -4288,14 +4589,33 @@ simSpeedSelect.addEventListener('change', () => {
 });
 
 simAddButton.addEventListener('click', () => {
-  const lines = Object.keys(simScenario ? simScenario.lines : {});
-  const usable = lines.find((id) => !simLineProblems(id).length) || lines[0] || '';
   const actions = ProcessModel.getSequence();
-  actions.push({ type: ProcessModel.ACTION_TYPES.TRANSPORT, lineId: usable, duration: 300 });
+  const lanes = simLanes().filter((lane) => lane.id);
+
+  // Per defecte, la primera bomba i una línia que aquella bomba pugui fer
+  // funcionar.
+  const pumpId = lanes.length ? lanes[0].id : '';
+  const lines = Object.keys(simScenario ? simScenario.lines : {})
+    .filter((id) => !pumpId || (simScenario.lines[id].pumpIds || []).includes(pumpId));
+  const usable = lines.find((id) => !simLineProblems(id).length) || lines[0] || '';
+
+  // S'encadena just després de l'última acció d'aquella mateixa bomba, que
+  // és el que es vol el 90 % dels cops; després ja es pot moure.
+  const startTime = actions
+    .filter((action) => (action.pumpId || '') === pumpId)
+    .reduce((end, action) => Math.max(end, (action.startTime || 0) + action.duration), 0);
+
+  actions.push({
+    type: ProcessModel.ACTION_TYPES.TRANSPORT,
+    pumpId,
+    lineId: usable,
+    startTime,
+    duration: 300,
+  });
   commitSequence(actions);
 });
 
-buildSimFactsShell();
+buildSimNowShell([]);
 
 // ---- Capa visual de la simulació ----
 // Dibuixa sobre el diagrama el que el motor diu que hi ha: el nivell de
@@ -4326,10 +4646,11 @@ const SIM_DOT_STROKE = 1.4;
 
 let simFlowPhase = 0;
 let simBarNodes = new Map();     // id d'element -> nodes de la seva barra
-let simFlowNodes = [];
-let simFlowChain = null;
-let simFlowLineId = '';
-let simFlowMode = 'product';   // 'product' (transport) o 'sweep' (barrido)
+// Un flux per cada línia que es veu treballar. Amb diverses bombes alhora
+// n'hi pot haver més d'un; el pressupost de partícules es reparteix entre
+// tots, de manera que el cost no creix amb el nombre de línies.
+let simFlows = new Map();   // lineId -> { chain, nodes, mode }
+let simFlowNodes = [];      // totes les partícules, per redimensionar-les
 
 const simReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -4503,17 +4824,24 @@ function clearSimActiveLine() {
     .forEach((node) => node.classList.remove('pid-element--active'));
 }
 
-function renderSimActiveLine(lineId) {
+function renderSimActiveLine(lineIds) {
   clearSimActiveLine();
-  const route = lineId ? simLineRoutes[lineId] : null;
-  if (!route) return;
+  if (!lineIds || !lineIds.length) return;
 
-  const connectors = new Set(route.pathConnectorIds);
+  const connectors = new Set();
+  const elements = new Set();
+
+  lineIds.forEach((lineId) => {
+    const route = simLineRoutes[lineId];
+    if (!route) return;
+    route.pathConnectorIds.forEach((key) => connectors.add(key));
+    route.pathElementIds.forEach((id) => elements.add(id));
+  });
+
   pipes.forEach((pipe) => {
     if (connectors.has(pipeKey(pipe))) pipe.path.classList.add('pipe-path--active');
   });
 
-  const elements = new Set(route.pathElementIds);
   viewport.querySelectorAll('.pid-element:not(.pipe)').forEach((node) => {
     if (elements.has(node.dataset.id)) node.classList.add('pid-element--active');
   });
@@ -4560,79 +4888,97 @@ function simFlowPoint(chain, distance) {
 function clearSimFlow() {
   simFlowNodes.forEach((node) => node.remove());
   simFlowNodes = [];
-  simFlowChain = null;
-  simFlowLineId = '';
-  simFlowMode = 'product';
+  simFlows = new Map();
 }
 
-function renderSimFlow(lineId, mode) {
-  // Sense línia activa, amb la preferència de reduir moviment o amb la
-  // reproducció aturada no hi ha res a animar.
-  if (!lineId || simReducedMotion.matches) {
+function renderSimFlow(active) {
+  // Sense cap línia activa, o amb la preferència de reduir moviment, no hi
+  // ha res a animar.
+  if (!active || !active.length || simReducedMotion.matches) {
     if (simFlowNodes.length) clearSimFlow();
     return;
   }
 
-  // Canviar de línia o passar de transportar a netejar vol partícules
-  // noves: les del barrido són blanques i les del producte, fosques.
-  if (lineId !== simFlowLineId || mode !== simFlowMode) {
-    clearSimFlow();
-    simFlowChain = buildSimFlowChain(lineId);
-    simFlowLineId = lineId;
-    simFlowMode = mode;
+  // Els que ja no toquen (línia acabada, o que ha passat de transportar a
+  // netejar) se'n van; els que falten es creen.
+  const wanted = new Map(active.map((item) => [item.lineId, item.mode]));
 
-    if (simFlowChain) {
-      const count = Math.min(SIM_MAX_PARTICLES,
-        Math.max(3, Math.round(simFlowChain.total / SIM_FLOW_SPACING)));
-      const className = mode === 'sweep' ? 'sim-flow__dot sim-flow__dot--sweep' : 'sim-flow__dot';
+  [...simFlows.keys()].forEach((lineId) => {
+    if (wanted.get(lineId) === simFlows.get(lineId).mode) return;
+    simFlows.get(lineId).nodes.forEach((node) => node.remove());
+    simFlows.delete(lineId);
+  });
 
-      for (let i = 0; i < count; i += 1) {
-        const dot = svgEl('circle', { class: className, cx: 0, cy: 0 });
-        simOverlay.appendChild(dot);
-        simFlowNodes.push(dot);
-      }
-      // Radi i gruix segons el zoom d'ara.
-      updateSimOverlayScale();
+  // Pressupost de partícules repartit entre les línies actives: així el
+  // cost no creix encara que n'hi hagi moltes alhora.
+  const budget = Math.max(3, Math.floor(SIM_MAX_PARTICLES / wanted.size));
+
+  wanted.forEach((mode, lineId) => {
+    if (simFlows.has(lineId)) return;
+
+    const chain = buildSimFlowChain(lineId);
+    if (!chain) return;
+
+    const count = Math.min(budget, Math.max(3, Math.round(chain.total / SIM_FLOW_SPACING)));
+    const className = mode === 'sweep' ? 'sim-flow__dot sim-flow__dot--sweep' : 'sim-flow__dot';
+    const nodes = [];
+
+    for (let i = 0; i < count; i += 1) {
+      const dot = svgEl('circle', { class: className, cx: 0, cy: 0 });
+      simOverlay.appendChild(dot);
+      nodes.push(dot);
     }
-  }
 
-  if (!simFlowChain) return;
+    simFlows.set(lineId, { chain, nodes, mode });
+  });
 
-  const gap = simFlowChain.total / simFlowNodes.length;
+  // Llista plana de totes les partícules, per poder-les redimensionar amb
+  // el zoom des d'un sol lloc.
+  simFlowNodes = [];
+  simFlows.forEach((flow) => flow.nodes.forEach((node) => simFlowNodes.push(node)));
+
   const radius = SIM_DOT_RADIUS / viewScale;
   const stroke = SIM_DOT_STROKE / viewScale;
 
-  simFlowNodes.forEach((dot, index) => {
-    const point = simFlowPoint(simFlowChain, simFlowPhase + index * gap);
-    dot.setAttribute('cx', point.x);
-    dot.setAttribute('cy', point.y);
-    dot.setAttribute('r', radius);
-    dot.setAttribute('stroke-width', stroke);
+  simFlows.forEach((flow) => {
+    const gap = flow.chain.total / flow.nodes.length;
+    flow.nodes.forEach((dot, index) => {
+      const point = simFlowPoint(flow.chain, simFlowPhase + index * gap);
+      dot.setAttribute('cx', point.x);
+      dot.setAttribute('cy', point.y);
+      dot.setAttribute('r', radius);
+      dot.setAttribute('stroke-width', stroke);
+    });
   });
 }
 
 // ---- Punt d'entrada de la capa visual ----
-// Quina línia s'ha de veure treballant i de quina manera. El transport el
-// diu el motor amb activeLineId; el barrido no mou producte i per tant el
-// motor no el marca com a actiu, però sí que en guarda la línia, que és el
-// que fa que es pugui ensenyar la canonada que s'està netejant.
+// Quines línies s'han de veure treballant i de quina manera. El transport
+// el diu el motor amb activeLineIds; el barrido no mou producte i per tant
+// el motor no el marca com a actiu, però sí que en guarda la línia, que és
+// el que fa que es pugui ensenyar la canonada que s'està netejant.
+//
+// Retorna una llista: amb diverses bombes treballant alhora n'hi pot haver
+// més d'una.
 function simActiveVisual(state) {
-  if (state.activeLineId) return { lineId: state.activeLineId, mode: 'product' };
+  const active = new Map();
 
-  const action = state.action;
-  const sweeping = action
-    && action.type === ProcessModel.ACTION_TYPES.SWEEP
-    && action.lineId
-    && state.time < action.endTime;
+  state.activeLineIds.forEach((lineId) => active.set(lineId, 'product'));
 
-  return sweeping ? { lineId: action.lineId, mode: 'sweep' } : { lineId: '', mode: 'product' };
+  state.actions.forEach((action) => {
+    if (action.type !== ProcessModel.ACTION_TYPES.SWEEP) return;
+    if (!action.lineId || state.time >= action.endTime) return;
+    if (!active.has(action.lineId)) active.set(action.lineId, 'sweep');
+  });
+
+  return [...active].map(([lineId, mode]) => ({ lineId, mode }));
 }
 
 function renderSimVisuals(state) {
   const active = simActiveVisual(state);
   renderSimBars(state);
-  renderSimActiveLine(active.lineId);
-  renderSimFlow(active.lineId, active.mode);
+  renderSimActiveLine(active.map((item) => item.lineId));
+  renderSimFlow(active);
 }
 
 function clearSimVisuals() {
@@ -4828,8 +5174,8 @@ function simPipeTip(pipeElement, state) {
   if (!lineId) return null;
 
   const line = simScenario.lines[lineId];
-  const visual = simActiveVisual(state);
-  const active = visual.lineId === lineId;
+  const visual = simActiveVisual(state).find((item) => item.lineId === lineId);
+  const active = Boolean(visual);
 
   const nodes = [];
   const title = document.createElement('p');
@@ -4922,7 +5268,9 @@ const SIM_PANEL_STORAGE_KEY = 'pid-editor.sim-panel';
 // applySimPanelLayout), de manera que no hi pot haver dues veritats.
 let simPanelLayout = {
   floating: false,
-  height: 340,
+  // Prou alt perquè, de sèrie, hi càpiguen les files del cronograma i les
+  // primeres accions de la taula fins i tot amb un avís a sobre.
+  height: 420,
   width: 900,
   left: 120,
   top: 120,

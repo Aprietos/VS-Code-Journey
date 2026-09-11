@@ -4,7 +4,9 @@ Document de referència per a qui continuï el projecte sense haver vist com
 es va fer. Descriu **què hi ha ara mateix** a la capa de dades de procés de
 l'Editor P&ID, on viu cada cosa i quines regles no s'han de trencar.
 
-Escrit en acabar l'**etapa 4**, l'última del pla:
+Escrit en acabar l'**etapa 4**, l'última del pla, i posat al dia després
+dels afegits que hi ha vingut després (bombes bufadores i cronograma en
+paral·lel):
 
 - **Etapa 1** — capa de dades de procés: rols d'element, producte,
   quantitats, capacitats, configuració de les línies de transport i
@@ -16,6 +18,10 @@ Escrit en acabar l'**etapa 4**, l'última del pla:
 - **Etapa 4** — **capa visual sobre el diagrama**: barres de nivell, línia
   activa destacada, flux de producte, informació en passar el ratolí i
   resum (§9).
+- **Després** — **bombes bufadores** (§4b) i **cronograma en paral·lel**:
+  una fila per bomba, accions amb instant d'inici propi, diverses línies
+  treballant alhora i detecció de xocs de bomba i de canonada (§3.2, §6.6,
+  §8.5, §8.7).
 
 Vegeu [Què NO hi ha](#què-no-hi-ha).
 
@@ -123,21 +129,34 @@ i un nom que el portés a dins quedaria desfasat.
 
 ### 3.2 La seqüència d'accions
 
-Una seqüència és una llista **ordenada** d'accions que s'executen una
-darrere l'altra, **sense solapaments**: només n'hi ha una d'activa alhora.
-Viu a `ProcessModel` (`getSequence()` / `setSequence()`); qui l'executa és
-el motor (§6).
+Una seqüència és una llista d'accions **col·locades en el temps**. Cada
+acció la fa **una bomba** i comença en un **instant explícit**, de manera que
+diverses accions **poden anar alhora** mentre siguin de bombes diferents i no
+comparteixin cap tram de la instal·lació. Viu a `ProcessModel`
+(`getSequence()` / `setSequence()`); qui l'executa és el motor (§6).
 
 ```js
-{ order: 1, type: 'transport', lineId: '<signatura de línia>', duration: 600 }
+{ order: 1, type: 'transport', pumpId: 'pump-4', lineId: '<signatura de línia>',
+  startTime: 0, duration: 600 }
 ```
 
 | Camp | Què és |
 | --- | --- |
-| `order` | Posició dins la seqüència: 1, 2, 3… `normalizeSequence()` la renumera sola a partir de la posició real a la llista. |
+| `order` | Número que es veu a la taula i amb què el motor l'anomena als missatges. `normalizeSequence()` el renumera sol. |
 | `type` | Un de `ProcessModel.ACTION_TYPES`: `transport`, `rest` (Descans), `sweep` (Barrido), `startup` (Posada a règim). |
+| `pumpId` | La **bomba bufadora** que fa l'acció (§4b). És la seva fila al cronograma. Buit vol dir «encara sense bomba»: es pot simular igualment, però surt a la fila «Sense bomba». |
 | `lineId` | La línia de transport (la seva **signatura**, §4). **Obligatòria** a les accions de transport i **opcional** al barrido, on només diu per quina canonada es fa la neteja. Als altres tipus s'ignora. |
+| `startTime` | **En segons** des del començament de l'operació. A la pantalla s'escriu en minuts. |
 | `duration` | **En segons**, sempre més gran que 0. A la pantalla es veurà en minuts; el model no arrodoneix mai. |
+
+`normalizeSequence()` ordena la llista **per `startTime`** (i, si empaten,
+per bomba i per la posició que tenien) i tot seguit renumera `order`. O
+sigui: la llista sempre es llegeix en ordre cronològic, i moure una acció en
+el temps la reordena sola.
+
+**`startTime: null` vol dir «arxiu d'abans del cronograma»**, i és l'única
+manera de distingir-ho d'un zero de debò. Qui ho converteix és
+`migrateSequenceToLanes()` a `script.js`, un sol cop en obrir l'arxiu (§10).
 
 La seqüència **es desa amb el model**, a `state.process.sequence`.
 `load()` la passa per `normalizeSequence()`, de manera que un arxiu tocat a
@@ -397,17 +416,31 @@ Un objecte pla. El motor no en modifica mai res.
   },
   lines: {
     '<signatura>': {
-      name: 'L1', throughput: 600,      // kg/h
+      name: 'Línia 1', throughput: 600,  // kg/h
       configured: true,                  // opcional; false = encara no configurada
       pickupId: 'injector-5', pickupName: 'Injector - P1',
       consumptionId: 'hopper-8',
       storageId: 'silo-3',
       storageStatus: 'found',            // 'found' | 'chosen' | 'ambiguous' | 'none'
+      pumpIds: ['pump-4'],               // bombes que la poden fer funcionar
+      route: {                           // per on passa, per detectar-hi xocs
+        elements: ['injector-5', 'diverter-2', 'hopper-8'],
+        connectors: ['pipe-11', 'pipe-12'],
+        labels: { 'injector-5': 'Injector - P1', 'hopper-8': 'Amassadora' },
+      },
     },
+  },
+  pumps: {
+    'pump-4': { name: 'Bomba 1', mode: 'push' },   // 'push' | 'suction' | ''
   },
   actions: [ /* vegeu §3.2 */ ],
 }
 ```
+
+**`route` és el que fa possible detectar els xocs** (§6.6): hi ha d'haver
+**tots** els elements pels quals passa la línia, els dos extrems inclosos
+(Pickup Point i punt de consum). `labels` només serveix per poder escriure
+missatges que un enginyer entengui («totes dues passen per "Desviadora - D2"»).
 
 El construeix **`buildSimulationScenario()`** a `script.js` (§8.1). La
 correspondència entre l'escenari i el projecte és aquesta:
@@ -426,15 +459,29 @@ El motor **no** simula sumant increments petits instant a instant. Això
 acumularia error, faria que el resultat depengués de la mida del pas i
 impediria moure el cursor enrere amb precisió. En comptes d'això:
 
-1. `compile()` calcula per endavant **tots els moments clau**: l'inici i el
-   final de cada acció i, quan un element d'emmagatzematge s'esgota enmig
-   d'una acció, **l'instant exacte** en què passa. Aquest instant surt de
-   **dividir la massa que queda pel cabal**, no de provar instants:
-   `segons = kg · 3600 / (kg/h)`.
-2. Entre dos moments clau consecutius **tot varia de manera perfectament
+1. `compile()` fa una **escombrada d'esdeveniments**. Els moments clau de
+   partida són l'inici i el final de **cada** acció; com que ara n'hi pot
+   haver de simultànies, a cada tram s'hi mira **quines accions són vives**
+   i quins fluxos hi ha en marxa.
+2. Quan **diverses línies treuen del mateix element d'emmagatzematge**, el
+   cabal de sortida d'aquell element és la **suma** dels cabals. L'instant
+   en què es buida surt de dividir la massa que queda **per aquesta suma**,
+   no per cap cabal solt: `segons = kg · 3600 / (Σ kg/h)`. Aquest instant és
+   un moment clau més i talla el tram.
+3. El que s'ha tret d'un element es reparteix entre les línies que hi
+   estiraven **en proporció al seu cabal**, amb una excepció escrita a
+   posta: si només n'hi havia una, se li dona **exactament** tota la massa
+   treta, sense passar per cap multiplicació ni divisió. Així el cas normal
+   (una línia sola) continua donant números rodons.
+4. Entre dos moments clau consecutius **tot varia de manera perfectament
    lineal**. Cada tram guarda la situació **exacta al seu inici** i el
    cabal de cada element durant el tram.
-3. `stateAt()` és llavors: trobar el tram i interpolar.
+5. `stateAt()` és llavors: trobar el tram i interpolar.
+
+L'escombrada té un sostre dur de trams (`MAX_SEGMENTS`), que no s'hauria
+d'assolir mai: amb N accions i M magatzems no en poden sortir més de
+2N+M+1. Hi és perquè, si algun dia s'hi afegeix una condició que es
+realimenti, el programa es quedi penjat **no** sigui una opció.
 
 D'aquí surten dues garanties que **no es poden trencar**:
 
@@ -462,13 +509,16 @@ Dos detalls que fan que els números surtin rodons:
   ok: true,
   errors: [], warnings: [ { code, message, atSeconds, ... } ],
   segments: [ {
-    index, startTime, endTime, actionOrder, actionType, lineId, moving,
+    index, startTime, endTime,
+    actionOrders: [1, 4],          // TOTES les accions vives en aquest tram
+    movingLineIds: ['<sig A>', '<sig B>'],
+    moving,                        // true si alguna línia mou producte
     storages:     { id: { start, ratePerHour, rate } },   // rate negatiu
     consumptions: { id: { start, ratePerHour, rate } },
     lines:        { id: { start, ratePerHour, rate } },   // kg acumulats per línia
   } ],
   actions: [ {
-    order, type, lineId, startTime, endTime, duration, moving,
+    order, type, pumpId, lineId, startTime, endTime, duration, moving,
     transferred,          // kg realment moguts
     complete,             // false si s'ha quedat curta
     incompleteReason,     // 'storage-empty'
@@ -488,8 +538,9 @@ mateix valor per ensenyar-lo per pantalla. Per interpolar, feu servir
 ```js
 {
   time, totalDuration, finished,
-  action: { order, type, lineId, startTime, endTime, duration, progress, complete, incompleteReason },
-  activeLineId,                  // '' si en aquell instant no es mou res
+  actions: [ { order, type, pumpId, lineId, startTime, endTime, duration,
+               progress, complete, incompleteReason } ],   // TOTES les vives ara
+  activeLineIds: ['<sig A>', '<sig B>'],   // buit si no es mou res
   storages:     { id: kg },
   consumptions: { id: kg },      // kg acumulats (quantitat inicial inclosa)
   lines:        { id: kg },      // kg transferits per aquella línia
@@ -497,8 +548,14 @@ mateix valor per ensenyar-lo per pantalla. Per interpolar, feu servir
 }
 ```
 
+`actions` i `activeLineIds` són **llistes** perquè amb diverses bombes hi pot
+haver més d'una acció en marxa al mateix instant. Van ordenades per `order`,
+de manera que el que es veu per pantalla no balla d'una imatge a l'altra.
+
 El temps demanat es retalla a `[0, totalDuration]`: consultar abans del
-començament o després del final no dispara mai.
+començament o després del final no dispara mai. `totalDuration` és **el
+final de l'última acció**, no la suma de durades: dues accions de 5 minuts
+que van alhora duren 5 minuts, no 10.
 
 ### 6.5 Límits físics
 
@@ -549,6 +606,31 @@ d'avisos ve buida: no s'informa a mitges d'un càlcul que no s'ha fet.
 | `storage-ambiguous` | La detecció va donar més d'un candidat i no se n'ha triat cap. |
 | `storage-empty` | L'element d'emmagatzematge comença sense gens de producte. |
 | `product-mismatch` | El producte de l'origen i el del destí d'una línia no coincideixen. |
+| `pump-conflict` | Dues accions de **la mateixa bomba** se solapen en el temps. Una bomba no pot fer dues coses alhora. |
+| `pipe-conflict` | Dues accions de **bombes diferents** se solapen i **comparteixen algun element del recorregut** (extrems inclosos). Dues coses alhora no poden passar pel mateix tram. |
+
+**Com es detecten els xocs** (`collectConflicts()` a `simulation.js`): es
+comparen totes les parelles d'accions; si les seves finestres de temps no es
+toquen, no hi ha res a mirar. Si es toquen i són de la mateixa bomba, és
+`pump-conflict` i s'acaba aquí. Si són de bombes diferents, es comparen els
+**elements** dels dos recorreguts (`line.route.elements`): si en comparteixen
+cap, és `pipe-conflict`. Els connectors no s'han de comparar a part —si dues
+accions comparteixen una canonada, també en comparteixen els dos elements
+dels extrems.
+
+Quins tipus d'acció ocupen la canonada ho diu la taula `OCCUPIES_PIPE`:
+**transport i barrido sí** (l'un hi passa producte i l'altre hi passa aire, i
+tots dos la volen per a ells sols); **descans i posada a règim no**, que
+només ocupen la bomba. Per això dues accions que no ocupen canonada mai no
+poden donar `pipe-conflict`, però sí `pump-conflict` si són de la mateixa
+bomba.
+
+Els dos missatges diuen **quines accions** xoquen, **de quina bomba** són,
+**de quin minut a quin minut** i, al `pipe-conflict`, **per quins elements**
+passen totes dues (fins a tres noms i «i N més»). L'error porta també
+`actionOrder`, `otherOrder`, `fromSeconds`, `toSeconds` i, si escau,
+`sharedElementIds`, que és el que fa servir la interfície per marcar les
+files i els blocs (§8.7).
 
 | Codi d'avís | Quan salta |
 | --- | --- |
@@ -565,7 +647,7 @@ productes diferents, ara mateix no salta cap error (vegeu §11).
 
 **Com executar-les: obre `tests/tests.html` amb el navegador** (doble clic al
 fitxer). Si tot va bé, la barra de dalt surt **verda** i diu
-`RESUM: 33 proves, totes correctes.`. Per tornar-les a executar, F5.
+`RESUM: 47 proves, totes correctes.`. Per tornar-les a executar, F5.
 
 No cal instal·lar res: el projecte no té build ni gestor de paquets, i la
 pàgina carrega `process.js` i `simulation.js` **de debò**, no una còpia.
@@ -575,6 +657,13 @@ pàgina carrega `process.js` i `simulation.js` **de debò**, no una còpia.
 | `tests/tests.html` | La pàgina que s'obre. |
 | `tests/runner.js` | Executor mínim: `Test.group()`, `Test.case()` i les comprovacions. |
 | `tests/simulation.test.js` | Les proves del motor. |
+
+Entre els grups n'hi ha dos que guarden les regles del cronograma en
+paral·lel i que **no s'han de deixar caure**: «Accions en paral·lel»
+(diverses línies alhora, suma de cabals des del mateix magatzem i instant
+exacte en què es buida) i «Conflictes entre accions simultànies»
+(`pump-conflict`, `pipe-conflict` i els casos que **no** han de xocar:
+descans i posada a règim, que no ocupen canonada).
 
 Les comprovacions són d'**igualtat exacta** per defecte (`assert.equal`).
 `assert.close` només es fa servir quan la coma flotant no pot donar un
@@ -647,7 +736,23 @@ del motor: `simScenario`, `simCompiled`, `simTime`, `simPlaying`,
 Res d'això es desa ni toca el projecte. **Stop** el descarta tornant a zero;
 el model de procés no s'ha tocat en cap moment.
 
-### 8.5 El cursor arrossegable
+### 8.5 El cronograma i el cursor arrossegable
+
+El cronograma és un **diagrama de Gantt**: una **fila per bomba**
+(`simLanes()`), totes compartint el mateix eix de temps, més una fila
+«Sense bomba» que només surt si hi ha alguna acció sense assignar. A
+l'esquerra de cada fila hi ha el nom de la bomba i **quant per cent de
+l'operació treballa**; la pista ratllada és el temps mort i els blaus, les
+accions.
+
+Els blocs es col·loquen en tant per cent de `simTimelineDuration()`, que és
+el **final de l'última acció**. Un bloc amb conflicte es pinta en vermell
+(`.sim-block--conflict`).
+
+L'amplada de la columna d'etiquetes és el token CSS `--sim-lane-label` i
+està duplicada a `script.js` com a `SIM_LANE_LABEL`. **Si canvieu l'una,
+canvieu l'altra**: és el que fa que el cursor, que travessa totes les files,
+caigui al lloc.
 
 La pista sencera (`#sim-track`) és la zona clicable. Amb `pointerdown` es
 captura el punter, amb `pointermove` es va posant el temps i amb `pointerup`
@@ -691,17 +796,43 @@ tooltip, i el motiu també s'escriu a la columna «Estimació». **Al barrido
 no**: com que no mou producte, qualsevol línia li val, i també pot no tenir-ne
 cap.
 
-#### Nom per defecte d'una línia
+#### Bomba, inici i línies que es poden triar
 
-En obrir la fitxa d'una línia **que no s'ha configurat mai**,
-`openLineProcessPanel()` hi posa `Línia N`, amb el número que la línia té ARA
-al panell lateral.
+Les columnes són `#`, `Bomba`, `Acció`, `Línia`, `Inici`, `Durada`,
+`Estimació` i els botons.
 
-És **un valor de partida, no un nom automàtic**: un cop desada la fitxa, el
-nom és de l'usuari i no es torna a tocar mai. Per això un recàlcul que canviï
-els números visibles **no renomena cap línia ja configurada**: el nom que hi
-ha desat ja no és el per defecte. La condició és `!ProcessModel.hasLine(...)`
-i prou.
+- **El desplegable de línia només ensenya les línies que la bomba d'aquella
+  acció pot fer funcionar** (`line.pumpIds.includes(action.pumpId)`). La que
+  ja hi ha triada no s'amaga mai, encara que hagi deixat de ser vàlida: si
+  no, no es podria ni veure ni canviar.
+- **Canviar la durada arrossega les accions posteriors de la mateixa
+  bomba**, conservant els forats que hi hagi entre elles. Sense això,
+  allargar una acció xocaria immediatament amb la següent, que no és el que
+  vol dir ningú quan només toca una durada. Les accions de les **altres**
+  bombes no es mouen: cada fila és independent.
+- **Inici i durada s'escriuen en minuts i es desen en segons.**
+
+#### Xocs: com es marquen i com es resolen
+
+`simConflictingOrders()` treu del resultat del motor el conjunt d'`order`
+implicats en algun `pump-conflict` o `pipe-conflict`. Amb això la interfície
+pinta la fila (`tr.is-conflict`) i el bloc del cronograma
+(`.sim-block--conflict`), i escriu «Xoca amb una altra acció» a l'estimació.
+El **missatge sencer**, amb els noms i els minuts, el dona el motor i surt a
+la safata d'avisos de dalt. Play queda bloquejat mentre n'hi hagi cap.
+
+`suggestFreeStart(index)` proposa **el primer instant lliure**: prova el zero
+i els finals de la resta d'accions —que són els únics instants on es pot
+obrir un forat— i **torna a preguntar al motor** per cada candidat fins que
+un no xoca. No hi ha cap regla repetida aquí: qui decideix si una col·locació
+val és sempre `SimulationEngine.validate()`. Si en troba un, surt el botó
+«Mou-la al minut N», que només canvia el `startTime` d'aquella acció.
+
+#### El nom d'una línia
+
+Una línia **no té camp de nom**: es diu sempre `Línia N`, amb el número que
+té ARA al panell lateral. La fitxa de la línia només demana rendiment,
+diàmetre i llargada, i ensenya quines bombes la poden fer funcionar (§4b).
 
 ### 8.8 Mida i posició del panell
 
@@ -810,12 +941,14 @@ El recorregut el dona `simLineRoutes[lineId]`, que `buildSimulationScenario()`
 omple amb els objectes de `findTransportLines()`. No entra a l'escenari
 perquè el motor no en fa res.
 
-**Quina línia es destaca** ho decideix `simActiveVisual(state)`:
+**Quines línies es destaquen** ho decideix `simActiveVisual(state)`, que
+torna una **llista** de `{ lineId, mode }` perquè amb diverses bombes n'hi
+pot haver més d'una alhora:
 
-- si el motor dona `state.activeLineId`, és un **transport** → mode
+- cada línia de `state.activeLineIds` és un **transport** → mode
   `'product'`;
-- si no, però l'acció actual és un **barrido amb línia** i encara no s'ha
-  acabat → aquella línia, mode `'sweep'`.
+- cada acció viva que sigui un **barrido amb línia** i encara no s'hagi
+  acabat hi afegeix aquella línia, mode `'sweep'`.
 
 El motor no marca el barrido com a actiu (no mou producte, i això no es toca);
 la línia arriba igualment a `compiled.actions[].lineId` i és el que permet
@@ -840,16 +973,24 @@ igual de grosses tant si mires un element de prop com tot el projecte de cop
 repintat i també des de `updateSimOverlayScale()`, que penja
 d'`applyViewport()` i per tant salta a cada pan i a cada zoom.
 
-**Dues menes de partícula.** `renderSimFlow(lineId, mode)`: `'product'`
-(fosques, transport) i `'sweep'` (blanques amb contorn fosc, barrido).
-Canviar de línia **o de mode** les torna a crear.
+**Dues menes de partícula.** `renderSimFlow(active)`: `'product'` (fosques,
+transport) i `'sweep'` (blanques amb contorn fosc, barrido). Canviar de
+línia **o de mode** les torna a crear.
+
+**Diverses línies alhora.** `active` és la llista de línies que es veuen
+treballar en aquest instant. Cada una té el seu joc de partícules a
+`simFlows` (`lineId → { chain, nodes, mode }`); les que deixen d'estar
+actives s'esborren i les noves es creen. El **pressupost de partícules es
+reparteix** entre les línies actives (`SIM_MAX_PARTICLES / nombre de
+línies`), de manera que el cost per imatge **no creix** encara que es facin
+anar sis bombes alhora.
 
 | Límit | Valor | Per què |
 | --- | --- | --- |
 | Partícules per línia | `SIM_MAX_PARTICLES` = 22 | sostre dur, independentment de la llargada del recorregut |
 | Separació | `SIM_FLOW_SPACING` = 70 unitats | poques partícules en recorreguts curts |
 | Mida | `SIM_DOT_RADIUS` = 4,5 px de pantalla | visible a qualsevol zoom |
-| Línies animades alhora | 1 | l'execució és seqüencial: només hi ha una acció activa |
+| Línies animades alhora | les que treballin | el pressupost total de partícules es reparteix entre elles |
 | Amb `prefers-reduced-motion` | 0 | no es crea cap partícula |
 | Amb la reproducció aturada | no avancen | la fase només creix a `simTick()` |
 | Amb la pestanya amagada | la reproducció es posa en pausa | vegeu §9.7 |
@@ -954,6 +1095,20 @@ La **seqüència** (§3.2) es va afegir a `state.process.sequence` sense pujar
 la versió: és un camp opcional i els arxius que no en porten obren amb la
 seqüència buida, que és el que toca.
 
+El pas a **cronograma en paral·lel** tampoc no ha pujat la versió, perquè
+`pumpId` i `startTime` també són camps opcionals. La conversió es fa en
+obrir l'arxiu, a `migrateSequenceToLanes()` (`script.js`):
+
+- Les accions amb `startTime: null` —o sigui, les d'un arxiu antic— es
+  **encadenen una darrere l'altra** tal com s'executaven abans: la primera
+  al zero i cada una tot seguit de l'anterior. Una seqüència antiga, doncs,
+  **fa exactament el mateix que feia**.
+- Cada acció rep la **primera bomba de la seva línia** (`line.pumpIds[0]`);
+  si la línia no en té cap, es queda a la fila «Sense bomba», que es pot
+  simular igualment.
+- Es fa **un sol cop**, en obrir, i el resultat es desa amb el projecte a la
+  primera desada. Una seqüència que ja porta hores no es toca mai.
+
 Quan una etapa futura necessiti un canvi que trenqui alguna cosa: pugeu
 `FILE_VERSION` i afegiu `MODEL_MIGRATIONS[n]`. `migrateModel()` les encadena
 totes.
@@ -1032,6 +1187,16 @@ la configuració d'una línia n'actualitzi el text **sense** refer la detecció
     n'inventa cap (§9.2).
 19. **El ressaltat de la simulació té classes pròpies** (`--active`),
     diferents de les del panell de línies (`--highlight`). No es barregen.
+20. **Dues accions alhora no poden compartir cap tram de la instal·lació**,
+    ni cap bomba. Ho decideix el motor, no la interfície, i bloqueja Play.
+21. **Els xocs es decideixen sobre `line.route.elements`**, extrems
+    inclosos. Qualsevol element nou que pugui formar part d'un recorregut hi
+    ha de sortir, o passaran dues coses alhora pel mateix lloc sense que
+    ningú ho digui.
+22. **La durada total és el final de l'última acció, no la suma.** Sumar
+    durades era correcte quan tot anava en fila; ara ja no ho és.
+23. **Una seqüència antiga ha de continuar fent el mateix.** Qualsevol canvi
+    a la conversió de §10 s'ha de comprovar amb un arxiu de debò.
 
 ---
 
@@ -1081,13 +1246,17 @@ Res d'això existeix, ni tan sols començat, i no s'ha de donar per fet:
   (§9.6), la sortida no.
 - Guardar els resultats d'una simulació a l'arxiu.
 - Física de barrido i posada a règim (§6.5).
-- Accions simultànies o en paral·lel a la seqüència.
 - Càlcul de pressions o de cabals a partir del diàmetre i la longitud, que
   es desen però encara no es fan servir per a res.
-- Accions en paral·lel. L'execució és estrictament seqüencial. Els trams
-  porten inici i final **absoluts**, de manera que el dia que calgui
-  permetre solapaments el que canviarà és com es decideixen aquests
-  inicis, no la resta del motor.
+- **Planificació automàtica**: ningú no col·loca les accions per tu ni
+  optimitza l'ordre. L'única ajuda que hi ha és el botó «Mou-la al minut N»
+  quan una acció xoca (§8.7), que proposa el primer forat lliure i prou.
+- **Límit de cabal d'una bomba**: una bomba no pot fer dues accions alhora,
+  però si en fa una no es comprova enlloc si li dona l'aire per al
+  rendiment que demana la línia.
+- **Recursos compartits que no siguin la canonada**: si dues línies
+  depenen del mateix compressor, del mateix filtre o del mateix quadre
+  elèctric i això no es veu al diagrama, el programa no ho pot saber.
 
 ### Idees per a més endavant
 

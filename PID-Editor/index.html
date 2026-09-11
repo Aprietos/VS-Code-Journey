@@ -263,13 +263,15 @@
 
     <!-- Cronograma: un bloc per acció, proporcional a la seva durada, amb
          el cursor arrossegable per sobre. -->
-    <div class="sim-timeline">
-      <div id="sim-ticks" class="sim-timeline__ticks"></div>
-      <div id="sim-track" class="sim-timeline__track" role="slider" tabindex="0"
-           aria-label="Cursor de temps" aria-valuemin="0" aria-valuenow="0" aria-valuemax="0">
-        <div id="sim-blocks" class="sim-timeline__blocks"></div>
-        <div id="sim-cursor" class="sim-timeline__cursor"></div>
+    <div id="sim-track" class="sim-timeline" role="slider" tabindex="0"
+         aria-label="Cursor de temps" aria-valuemin="0" aria-valuenow="0" aria-valuemax="0">
+      <div class="sim-timeline__head">
+        <span class="sim-lane__label"></span>
+        <div id="sim-ticks" class="sim-timeline__ticks"></div>
       </div>
+      <!-- Una fila per bomba, totes compartint el mateix eix de temps. -->
+      <div id="sim-lanes" class="sim-timeline__lanes"></div>
+      <div id="sim-cursor" class="sim-timeline__cursor"></div>
     </div>
 
     <div class="sim-columns">
@@ -282,7 +284,7 @@
         <div class="sim-table-wrap">
           <table class="sim-table">
             <thead>
-              <tr><th>#</th><th>Acció</th><th>Línia</th><th>Durada</th><th>Estimació</th><th></th></tr>
+              <tr><th>#</th><th>Bomba</th><th>Acció</th><th>Línia</th><th>Inici</th><th>Durada</th><th>Estimació</th><th></th></tr>
             </thead>
             <tbody id="sim-rows"></tbody>
           </table>
@@ -297,7 +299,7 @@
       <!-- Acció actual -->
       <section class="sim-col" aria-labelledby="sim-now-title">
         <h3 id="sim-now-title" class="lines-panel__subtitle">Acció actual</h3>
-        <dl id="sim-now" class="sim-facts"></dl>
+        <div id="sim-now" class="sim-now"></div>
       </section>
 
       <!-- Estat numèric del sistema -->

@@ -21,6 +21,12 @@
 // pura de (compilat, t). Consultar el minut 3 dona sempre exactament el
 // mateix resultat, s'hi arribi com s'hi arribi i a la velocitat que sigui.
 //
+// Les accions NO són seqüencials: cada una porta la seva bomba i el seu
+// instant d'inici, i diverses poden estar actives alhora. compile() fa una
+// escombrada per esdeveniments (vegeu-hi el comentari) i, quan diverses
+// línies buiden el mateix element d'emmagatzematge, el cabal de sortida és
+// la SUMA de totes, que és el que decideix quan es buida.
+//
 // El temps va sempre en SEGONS. Els cabals de configuració van en kg/h.
 // Vegeu docs/SIMULATION.md.
 const SimulationEngine = (() => {
@@ -34,7 +40,8 @@ const SimulationEngine = (() => {
   // barrido i la posada a règim només ocupen temps. El dia que hagin de
   // moure alguna cosa (arrossegar el producte que queda a la canonada,
   // per exemple), el canvi comença en aquesta taula i continua a
-  // buildAction(), que és qui decideix quins trams genera cada acció.
+  // l'escombrada de compile(), que és qui decideix quins cabals hi ha
+  // actius a cada tram.
   //
   // Les claus han de coincidir amb ProcessModel.ACTION_TYPES; hi ha una
   // prova automàtica que comprova que no se'n desincronitzin.
@@ -44,6 +51,22 @@ const SimulationEngine = (() => {
     sweep: false,
     startup: false,
   };
+
+  // Quins tipus d'acció ocupen la CANONADA (i, per tant, no poden anar
+  // alhora que una altra que comparteixi recorregut). El transport hi passa
+  // producte i el barrido hi passa aire, i tots dos necessiten la canonada
+  // per a ells sols; el descans i la posada a règim només ocupen la bomba.
+  const OCCUPIES_PIPE = {
+    transport: true,
+    rest: false,
+    sweep: true,
+    startup: false,
+  };
+
+  // Sostre dur de trams, per garantir que l'escombrada acaba sempre encara
+  // que algun dia s'hi afegeixi una condició que es realimenti. Amb N
+  // accions i M magatzems no en poden sortir més de 2N+M+1.
+  const MAX_SEGMENTS = 5000;
 
   // ---- Textos ----
   // Els missatges els llegirà un enginyer, no un programador: han de dir
@@ -107,6 +130,12 @@ const SimulationEngine = (() => {
       if (!(Number(action.duration) > 0)) {
         errors.push(issue('invalid-duration',
           `${where} (${what}): la durada ha de ser més gran que zero.`,
+          { actionOrder: order }));
+      }
+
+      if (!(Number(action.startTime) >= 0)) {
+        errors.push(issue('invalid-start',
+          `${where} (${what}): l'instant d'inici no pot ser negatiu.`,
           { actionOrder: order }));
       }
 
@@ -195,7 +224,110 @@ const SimulationEngine = (() => {
       }
     });
 
+    errors.push(...collectConflicts(scenario));
     return errors;
+  }
+
+  // ---- Conflictes entre accions simultànies ----
+  // Dues accions que se solapen en el temps no poden compartir ni la bomba
+  // ni la canonada.
+  //
+  // La regla de canonada és: comparteixen canonada si els RECORREGUTS de
+  // les seves línies tenen algun element en comú, el punt de recollida i el
+  // de consum inclosos. Mirar els elements ja cobreix els trams de
+  // canonada: si dues rutes comparteixen una canonada, comparteixen per
+  // força els dos elements que uneix. I al revés no: dues rutes poden
+  // passar per la mateixa desviadora per branques diferents sense compartir
+  // cap tram, i això TAMBÉ és un conflicte, perquè la desviadora no pot
+  // estar posada de dues maneres alhora.
+  function actionWindow(action) {
+    const start = Number(action.startTime) || 0;
+    return { start, end: start + (Number(action.duration) || 0) };
+  }
+
+  function overlaps(a, b) {
+    // Tocar-se no és solapar-se: una acció pot començar just quan acaba
+    // l'altra.
+    return a.start < b.end && b.start < a.end;
+  }
+
+  function actionLabelFor(action) {
+    const what = actionLabel(action.type);
+    return `l'acció ${action.order} (${what})`;
+  }
+
+  function collectConflicts(scenario) {
+    const errors = [];
+    const actions = Array.isArray(scenario.actions) ? scenario.actions : [];
+    const lines = scenario.lines || {};
+    const pumps = scenario.pumps || {};
+
+    const pumpLabel = (id) => (pumps[id] && pumps[id].name) || (id ? id : 'sense bomba');
+
+    const routeOf = (action) => {
+      const line = lines[action.lineId];
+      const route = line && line.route;
+      return OCCUPIES_PIPE[action.type] && action.lineId && route && Array.isArray(route.elements)
+        ? route
+        : null;
+    };
+
+    for (let i = 0; i < actions.length; i += 1) {
+      for (let j = i + 1; j < actions.length; j += 1) {
+        const a = actions[i];
+        const b = actions[j];
+        const wa = actionWindow(a);
+        const wb = actionWindow(b);
+        if (!overlaps(wa, wb)) continue;
+
+        const from = Math.max(wa.start, wb.start);
+        const to = Math.min(wa.end, wb.end);
+        const when = `del minut ${minuteLabel(from)} al ${minuteLabel(to)}`;
+
+        // Una bomba no pot fer dues coses alhora.
+        if ((a.pumpId || '') === (b.pumpId || '')) {
+          errors.push(issue('pump-conflict',
+            `${capitalize(actionLabelFor(a))} i ${actionLabelFor(b)} són totes dues de `
+            + `«${pumpLabel(a.pumpId)}» i se solapen ${when}. Una bomba no pot fer dues `
+            + 'coses alhora: mou-ne una o canvia-la de bomba.',
+            { actionOrder: a.order, otherOrder: b.order, fromSeconds: from, toSeconds: to }));
+          continue;
+        }
+
+        // Bombes diferents: el problema és la canonada.
+        const ra = routeOf(a);
+        const rb = routeOf(b);
+        if (!ra || !rb) continue;
+
+        const other = new Set(rb.elements);
+        const shared = ra.elements.filter((id) => other.has(id));
+        if (!shared.length) continue;
+
+        const names = shared
+          .map((id) => (ra.labels && ra.labels[id]) || (rb.labels && rb.labels[id]) || id)
+          .slice(0, 3);
+        const more = shared.length > names.length ? ` i ${shared.length - names.length} més` : '';
+
+        errors.push(issue('pipe-conflict',
+          `${capitalize(actionLabelFor(a))} («${pumpLabel(a.pumpId)}») i ${actionLabelFor(b)} `
+          + `(«${pumpLabel(b.pumpId)}») se solapen ${when} i totes dues passen per `
+          + `${names.map((name) => `«${name}»`).join(', ')}${more}. `
+          + 'Dues accions alhora no poden compartir cap tram de la instal·lació.',
+          {
+            actionOrder: a.order,
+            otherOrder: b.order,
+            fromSeconds: from,
+            toSeconds: to,
+            sharedElementIds: shared,
+          }));
+      }
+    }
+
+    return errors;
+  }
+
+  function capitalize(text) {
+    return text.charAt(0).toUpperCase() + text.slice(1);
   }
 
   // ---- Compilació ----
@@ -231,7 +363,6 @@ const SimulationEngine = (() => {
     lineIds.forEach((id) => { current.lines[id] = 0; });
 
     const segments = [];
-    const actions = [];
     const warnings = [];
     const emptiedAt = {};    // element -> segon en què es buida (el primer cop)
     const exceededAt = {};   // punt de consum -> segon en què passa de capacitat
@@ -244,146 +375,198 @@ const SimulationEngine = (() => {
       if (capacity > 0 && current.consumptions[id] > capacity) exceededAt[id] = 0;
     });
 
-    // Afegeix un tram i avança l'estat fins al seu final.
-    // `movement` és null quan el tram no mou res, o
-    // { lineId, storageId, consumptionId, perHour, moved } quan sí.
-    function pushSegment(from, to, action, movement) {
-      const segment = {
-        index: segments.length,
-        startTime: from,
-        endTime: to,
-        actionOrder: action.order,
-        actionType: action.type,
-        lineId: movement ? movement.lineId : '',
-        moving: Boolean(movement),
-        storages: {},
-        consumptions: {},
-        lines: {},
-      };
-
-      const entry = (value, perHour) => ({
-        start: value,
-        ratePerHour: perHour,        // el número autoritatiu: els càlculs el fan servir
-        rate: perHour / SECONDS_PER_HOUR, // el mateix en kg/s, per ensenyar-lo
-      });
-
-      storageIds.forEach((id) => {
-        const perHour = movement && movement.storageId === id ? -movement.perHour : 0;
-        segment.storages[id] = entry(current.storages[id], perHour);
-      });
-      consumptionIds.forEach((id) => {
-        const perHour = movement && movement.consumptionId === id ? movement.perHour : 0;
-        segment.consumptions[id] = entry(current.consumptions[id], perHour);
-      });
-      lineIds.forEach((id) => {
-        const perHour = movement && movement.lineId === id ? movement.perHour : 0;
-        segment.lines[id] = entry(current.lines[id], perHour);
-      });
-
-      segments.push(segment);
-
-      if (!movement) return;
-
-      // Avís de capacitat: l'instant exacte en què el punt de consum passa
-      // de la seva capacitat màxima, dins d'aquest tram.
-      const target = safe.consumptions[movement.consumptionId];
-      const capacity = Number(target.capacity) || 0;
-      const before = current.consumptions[movement.consumptionId];
-      if (capacity > 0 && exceededAt[movement.consumptionId] === undefined
-          && before + movement.moved > capacity) {
-        exceededAt[movement.consumptionId] = before >= capacity
-          ? from
-          : from + ((capacity - before) * SECONDS_PER_HOUR) / movement.perHour;
-      }
-
-      // `moved` ja ve calculat pel cridador i, quan el tram acaba just al
-      // buidar-se l'element, és exactament el que hi quedava: la resta dona
-      // zero exacte i no una engruna en coma flotant.
-      current.storages[movement.storageId] -= movement.moved;
-      current.consumptions[movement.consumptionId] += movement.moved;
-      current.lines[movement.lineId] += movement.moved;
-
-      if (current.storages[movement.storageId] <= 0 && emptiedAt[movement.storageId] === undefined) {
-        emptiedAt[movement.storageId] = to;
-      }
-    }
-
-    // Genera els trams d'una acció i en retorna el resultat.
-    //
-    // Aquí és on s'hi afegirien més límits físics (pressió mínima, cabal
-    // màxim de la canonada, temps de posada a règim...): cada límit nou és
-    // un moment clau més i, per tant, un tall de tram més. El patró a
-    // seguir és el de l'element que es buida: calcular l'instant exacte,
-    // tallar-hi el tram i marcar l'acció.
-    function buildAction(action, startTime) {
-      const endTime = startTime + action.duration;
-      const result = {
+    // Accions amb el seu instant d'inici i el seu final, en absolut. Cada
+    // una porta la seva bomba: diverses poden estar actives alhora, sempre
+    // que la validació no hi hagi trobat cap conflicte.
+    const actions = (safe.actions || []).map((action) => {
+      const startTime = Number(action.startTime) || 0;
+      const duration = Number(action.duration) || 0;
+      return {
         order: action.order,
         type: action.type,
+        pumpId: action.pumpId || '',
         lineId: action.lineId || '',
         startTime,
-        endTime,
-        duration: action.duration,
+        duration,
+        endTime: startTime + duration,
         moving: false,
         transferred: 0,
         complete: true,
         incompleteReason: '',
       };
+    });
 
-      if (!MOVES_PRODUCT[action.type]) {
-        pushSegment(startTime, endTime, action, null);
-        return result;
-      }
+    const totalDuration = actions.reduce((max, action) => Math.max(max, action.endTime), 0);
 
-      const line = safe.lines[action.lineId];
-      const perHour = Number(line.throughput);
-      const storageId = line.storageId;
-      const available = current.storages[storageId];
+    // Instants en què alguna cosa canvia per si sola: els inicis i els
+    // finals de TOTES les accions, de totes les bombes.
+    const boundaries = [...new Set([0, ...actions.map((a) => a.startTime), ...actions.map((a) => a.endTime)])]
+      .filter((value) => value >= 0 && value <= totalDuration)
+      .sort((x, y) => x - y);
 
-      // Límit físic: una línia no pot transferir mai més del que queda.
-      if (!(available > 0)) {
-        pushSegment(startTime, endTime, action, null);
-        result.complete = false;
-        result.incompleteReason = 'storage-empty';
-        return result;
-      }
+    // Afegeix un tram i avança l'estat fins al seu final.
+    //
+    // `flows` són les línies que mouen producte durant el tram, cadascuna
+    // amb el seu cabal. `emptyingId`, si n'hi ha, és el magatzem que es
+    // buida JUSTAMENT al final del tram: llavors el que en surt és
+    // exactament el que hi quedava, i la resta dona zero clavat en comptes
+    // d'una engruna en coma flotant.
+    function pushSegment(from, to, activeActions, flows, emptyingId) {
+      const seconds = to - from;
 
-      result.moving = true;
-      const movement = { lineId: action.lineId, storageId, consumptionId: line.consumptionId, perHour };
+      // Cabals nets. Quan diverses línies treuen del mateix magatzem, el
+      // cabal de sortida és la SUMA: és el que fa que es buidi abans.
+      const storageRate = {};
+      const consumptionRate = {};
+      const lineRate = {};
 
-      // Multiplicar primer i dividir per 3600 al final (i no convertir el
-      // cabal a kg/s abans) evita l'arrodoniment: 600 kg/h durant 600 s
-      // dona 100 kg exactes, no 99,999999999999.
-      const wanted = (perHour * action.duration) / SECONDS_PER_HOUR;
+      flows.forEach((flow) => {
+        storageRate[flow.storageId] = (storageRate[flow.storageId] || 0) + flow.perHour;
+        consumptionRate[flow.consumptionId] = (consumptionRate[flow.consumptionId] || 0) + flow.perHour;
+        lineRate[flow.lineId] = (lineRate[flow.lineId] || 0) + flow.perHour;
+      });
 
-      if (wanted <= available) {
-        pushSegment(startTime, endTime, action, { ...movement, moved: wanted });
-        result.transferred = wanted;
-        return result;
-      }
+      const entry = (value, perHour) => ({
+        start: value,
+        ratePerHour: perHour,              // el número autoritatiu
+        rate: perHour / SECONDS_PER_HOUR,  // el mateix en kg/s, per ensenyar-lo
+      });
 
-      // S'esgota enmig de l'acció. L'instant surt de dividir la massa que
-      // queda pel cabal: és exacte, no el següent pas d'un rellotge.
-      const emptyTime = startTime + (available * SECONDS_PER_HOUR) / perHour;
-      pushSegment(startTime, emptyTime, action, { ...movement, moved: available });
-      if (emptyTime < endTime) pushSegment(emptyTime, endTime, action, null);
+      const segment = {
+        index: segments.length,
+        startTime: from,
+        endTime: to,
+        actionOrders: activeActions.map((action) => action.order),
+        movingLineIds: flows.map((flow) => flow.lineId),
+        moving: flows.length > 0,
+        storages: {},
+        consumptions: {},
+        lines: {},
+      };
 
-      result.transferred = available;
-      result.complete = false;
-      result.incompleteReason = 'storage-empty';
-      return result;
+      storageIds.forEach((id) => {
+        segment.storages[id] = entry(current.storages[id], -(storageRate[id] || 0));
+      });
+      consumptionIds.forEach((id) => {
+        segment.consumptions[id] = entry(current.consumptions[id], consumptionRate[id] || 0);
+      });
+      lineIds.forEach((id) => {
+        segment.lines[id] = entry(current.lines[id], lineRate[id] || 0);
+      });
+
+      segments.push(segment);
+
+      // Quant surt de cada magatzem durant el tram. El que es buida just al
+      // final en dona exactament el que li quedava.
+      const drawn = {};
+      Object.keys(storageRate).forEach((id) => {
+        drawn[id] = id === emptyingId
+          ? current.storages[id]
+          : (storageRate[id] * seconds) / SECONDS_PER_HOUR;
+      });
+
+      flows.forEach((flow) => {
+        // Amb una sola línia, la part és tot el que ha sortit, sense cap
+        // divisió pel mig: els números en sèrie surten idèntics als d'abans.
+        const total = storageRate[flow.storageId];
+        const share = flow.perHour === total
+          ? drawn[flow.storageId]
+          : (drawn[flow.storageId] * flow.perHour) / total;
+
+        // Avís de capacitat: l'instant exacte en què el punt de consum passa
+        // de la seva capacitat màxima, dins d'aquest tram.
+        const target = safe.consumptions[flow.consumptionId];
+        const capacity = Number(target.capacity) || 0;
+        const before = current.consumptions[flow.consumptionId];
+        const rate = consumptionRate[flow.consumptionId];
+        if (capacity > 0 && exceededAt[flow.consumptionId] === undefined
+            && before + (rate * seconds) / SECONDS_PER_HOUR > capacity) {
+          exceededAt[flow.consumptionId] = before >= capacity
+            ? from
+            : from + ((capacity - before) * SECONDS_PER_HOUR) / rate;
+        }
+
+        current.consumptions[flow.consumptionId] += share;
+        current.lines[flow.lineId] += share;
+        flow.action.transferred += share;
+        flow.action.moving = true;
+      });
+
+      Object.keys(drawn).forEach((id) => {
+        current.storages[id] -= drawn[id];
+        if (current.storages[id] <= 0) {
+          current.storages[id] = 0;
+          if (emptiedAt[id] === undefined) emptiedAt[id] = to;
+        }
+      });
     }
 
-    // Execució estrictament seqüencial: cada acció comença on acaba
-    // l'anterior. Els trams porten inici i final absoluts, de manera que el
-    // dia que s'hagin de permetre accions en paral·lel el que canviarà és
-    // com es decideixen aquests inicis, no la resta del motor.
+    // ---- Escombrada per esdeveniments ----
+    // A cada pas es mira quines accions estan actives, es reparteixen els
+    // cabals i es talla el tram al primer esdeveniment que passi: o bé una
+    // frontera d'acció, o bé un magatzem que es buida. Entre dos talls tot
+    // varia de manera perfectament lineal, que és el que permet que
+    // consultar un instant sigui interpolar i prou.
     let time = 0;
-    (safe.actions || []).forEach((action) => {
-      const result = buildAction(action, time);
-      actions.push(result);
-      time = result.endTime;
-    });
+    let guard = 0;
+
+    while (time < totalDuration && guard < MAX_SEGMENTS) {
+      guard += 1;
+
+      const activeActions = actions.filter(
+        (action) => action.startTime <= time && time < action.endTime,
+      );
+
+      // Línies que mouen producte ara mateix. Una línia el magatzem de la
+      // qual ja és buit no mou res, i la seva acció queda incompleta.
+      const flows = [];
+      activeActions.forEach((action) => {
+        if (!MOVES_PRODUCT[action.type]) return;
+
+        const line = safe.lines[action.lineId];
+        if (!line) return;
+
+        const perHour = Number(line.throughput);
+        if (!(perHour > 0)) return;
+
+        if (!(current.storages[line.storageId] > 0)) {
+          action.complete = false;
+          action.incompleteReason = 'storage-empty';
+          return;
+        }
+
+        flows.push({
+          action,
+          lineId: action.lineId,
+          storageId: line.storageId,
+          consumptionId: line.consumptionId,
+          perHour,
+        });
+      });
+
+      // Fins on arriba el tram: la frontera d'acció següent...
+      const nextBoundary = boundaries.find((value) => value > time);
+      let segmentEnd = nextBoundary === undefined ? totalDuration : Math.min(nextBoundary, totalDuration);
+
+      // ...o abans, si algun magatzem es buida pel mig. L'instant surt de
+      // dividir la massa que queda per la SUMA dels cabals que en treuen.
+      const storageRate = {};
+      flows.forEach((flow) => {
+        storageRate[flow.storageId] = (storageRate[flow.storageId] || 0) + flow.perHour;
+      });
+
+      let emptyingId = '';
+      Object.keys(storageRate).forEach((id) => {
+        const when = time + (current.storages[id] * SECONDS_PER_HOUR) / storageRate[id];
+        if (when < segmentEnd) {
+          segmentEnd = when;
+          emptyingId = id;
+        }
+      });
+
+      pushSegment(time, segmentEnd, activeActions, flows, emptyingId);
+      time = segmentEnd;
+    }
 
     // ---- Avisos (no bloquegen) ----
     Object.keys(emptiedAt).sort().forEach((id) => {
@@ -428,7 +611,7 @@ const SimulationEngine = (() => {
       segments,
       actions,
       keyTimes,
-      totalDuration: time,
+      totalDuration,
       // Situació al final de la seqüència, calculada i no interpolada, per
       // no dependre de l'arrodoniment just a l'últim instant.
       final: {
@@ -479,8 +662,9 @@ const SimulationEngine = (() => {
       time,
       totalDuration: total,
       finished: time >= total,
-      action: null,
-      activeLineId: '',
+      // Diverses accions poden estar actives alhora, una per bomba.
+      actions: [],
+      activeLineIds: [],
       storages: {},
       consumptions: {},
       lines: {},
@@ -512,27 +696,36 @@ const SimulationEngine = (() => {
     }
 
     const segment = segmentAt(compiled, Math.min(time, total));
-    const action = compiled.actions.find((item) => item.order === segment.actionOrder) || null;
 
-    if (action) {
-      state.action = {
-        order: action.order,
-        type: action.type,
-        lineId: action.lineId,
-        startTime: action.startTime,
-        endTime: action.endTime,
-        duration: action.duration,
-        progress: action.duration > 0
-          ? Math.min(Math.max((time - action.startTime) / action.duration, 0), 1)
-          : 1,
-        complete: action.complete,
-        incompleteReason: action.incompleteReason,
-      };
-    }
+    // Just al final de tot ja no hi ha res actiu.
+    const running = time < total;
 
-    // La línia activa només compta mentre es mou producte de debò: durant
-    // la cua d'una acció que s'ha quedat sense producte no n'hi ha cap.
-    state.activeLineId = (segment.moving && time < segment.endTime) ? segment.lineId : '';
+    state.actions = running
+      ? segment.actionOrders
+        .map((order) => compiled.actions.find((item) => item.order === order))
+        .filter(Boolean)
+        .map((action) => ({
+          order: action.order,
+          type: action.type,
+          pumpId: action.pumpId,
+          lineId: action.lineId,
+          startTime: action.startTime,
+          endTime: action.endTime,
+          duration: action.duration,
+          progress: action.duration > 0
+            ? Math.min(Math.max((time - action.startTime) / action.duration, 0), 1)
+            : 1,
+          // Mou producte ARA mateix? Una acció que s'ha quedat sense
+          // magatzem continua activa però ja no mou res.
+          moving: segment.movingLineIds.indexOf(action.lineId) > -1,
+          complete: action.complete,
+          incompleteReason: action.incompleteReason,
+        }))
+      : [];
+
+    // Les línies que mouen producte de debò en aquest instant: durant la
+    // cua d'una acció que s'ha quedat sense producte no n'hi ha cap.
+    state.activeLineIds = running ? [...segment.movingLineIds] : [];
     state.warnings = compiled.warnings.filter((warning) => warning.atSeconds <= time);
 
     return state;
