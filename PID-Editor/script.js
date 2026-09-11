@@ -504,7 +504,10 @@ function createElementInstance(type) {
   // El nom d'una bomba es veu al diagrama i al panell de línies abans que
   // ningú n'obri la fitxa, així que se li posa el primer "Bomba N" lliure
   // ja en néixer. A partir d'aquí és seu: ningú no l'hi torna a canviar.
-  if (type === PUMP_TYPE) ProcessModel.setElement(g.dataset.id, PUMP_TYPE, { name: defaultPumpName(g) });
+  if (type === PUMP_TYPE) {
+    ProcessModel.setElement(g.dataset.id, PUMP_TYPE, { name: defaultPumpName(g) });
+    updatePumpBadge(g);
+  }
 
   return g;
 }
@@ -1092,57 +1095,132 @@ function makeHandleDraggable(pipe, handle) {
 // Permet iniciar la creació d'una canonada arrossegant des d'un punt de
 // connexió, i canviar la direcció d'un punt que ja té una canonada
 // connectada simplement clicant-hi.
+// Distància a partir de la qual prémer i deixar anar compta com un
+// arrossegament i no com un clic. Serveix per no confondre "clicar un punt
+// per canviar la direcció de la seva canonada" amb "arrossegar des d'un
+// punt", que abans acabava canviant la forma d'una canonada sense voler.
+const CONNECT_DRAG_SLOP = 4;
+
+// Acaba l'arrossegament d'una canonada nova: treu la previsualització i
+// oblida'l. La segona part (escombrar les previsualitzacions que hagin
+// quedat orfes) és una xarxa de seguretat: una previsualització perduda es
+// queda dibuixada al canvas amb la seva línia discontínua i NO es pot
+// seleccionar ni esborrar, perquè no és cap element de debò.
+function cancelPendingPipe() {
+  if (pendingPipe && pendingPipe.capturedBy) {
+    try {
+      if (pendingPipe.capturedBy.hasPointerCapture(pendingPipe.pointerId)) {
+        pendingPipe.capturedBy.releasePointerCapture(pendingPipe.pointerId);
+      }
+    } catch { /* ja no la teníem */ }
+  }
+
+  pendingPipe = null;
+  viewport.querySelectorAll('.pipe-path--preview').forEach((node) => node.remove());
+}
+
+// Crea la canonada si s'ha deixat anar sobre un punt de connexió lliure
+// d'un altre element.
+function finishPendingPipe(event) {
+  const targetUnderCursor = document.elementFromPoint(event.clientX, event.clientY);
+  const targetPoint = targetUnderCursor && targetUnderCursor.closest
+    ? targetUnderCursor.closest('.connection-point')
+    : null;
+  const targetElement = targetPoint && targetPoint.closest('.pid-element');
+  const targetRole = targetPoint && targetPoint.dataset.role;
+
+  if (
+    !targetElement
+    || targetElement === pendingPipe.fromElement
+    || isPointConnected(targetElement, targetRole)
+    // El punt d'origen es pot haver connectat mentrestant (per exemple si
+    // s'ha desfet alguna cosa a mig arrossegar).
+    || isPointConnected(pendingPipe.fromElement, pendingPipe.fromRole)
+  ) return;
+
+  const fromDir = getNaturalPortDirection(pendingPipe.fromElement, pendingPipe.fromRole);
+  const toDir = getNaturalPortDirection(targetElement, targetRole);
+  createPipe(pendingPipe.fromElement, pendingPipe.fromRole, fromDir, targetElement, targetRole, toDir);
+  pushHistory();
+}
+
 function makeConnectable(element) {
   element.querySelectorAll('.connection-point').forEach((point) => {
-    // Cal aturar tant "pointerdown" (que és el que arrossega l'element, vegeu
-    // makeDraggable) com "mousedown" perquè clicar un punt de connexió no
-    // n'inicïi també un arrossegament de l'element sencer.
-    point.addEventListener('pointerdown', (event) => event.stopPropagation());
-    point.addEventListener('mousedown', (event) => {
+    let pressedAt = null;
+
+    // Cal aturar la propagació perquè clicar un punt de connexió no iniciï
+    // també un arrossegament de l'element sencer (vegeu makeDraggable).
+    point.addEventListener('pointerdown', (event) => {
       event.stopPropagation();
+      if (event.button !== 0) return;
+
+      pressedAt = { x: event.clientX, y: event.clientY };
       if (isPointConnected(element, point.dataset.role)) return;
+
+      // Qualsevol arrossegament anterior que hagi quedat a mitges s'acaba
+      // aquí: no hi pot haver mai dues previsualitzacions alhora.
+      cancelPendingPipe();
 
       const previewPath = document.createElementNS(svgNS, 'path');
       previewPath.classList.add('pipe-path', 'pipe-path--preview');
       viewport.appendChild(previewPath);
-      pendingPipe = { fromElement: element, fromRole: point.dataset.role, previewPath };
+
+      // Es captura el punter, com a makeDraggable: així l'arrossegament rep
+      // sempre el seu final encara que el botó es deixi anar fora de la
+      // finestra. Sense això, un "mouseup" perdut deixava la
+      // previsualització dibuixada per sempre.
+      try { point.setPointerCapture(event.pointerId); } catch { /* sense captura */ }
+
+      pendingPipe = {
+        fromElement: element,
+        fromRole: point.dataset.role,
+        previewPath,
+        pointerId: event.pointerId,
+        capturedBy: point,
+      };
     });
+
     point.addEventListener('click', (event) => {
       event.stopPropagation();
+
+      // Si el cursor s'ha mogut, això era un arrossegament i no un clic: no
+      // s'ha de canviar la direcció de res.
+      const moved = pressedAt
+        && Math.hypot(event.clientX - pressedAt.x, event.clientY - pressedAt.y) > CONNECT_DRAG_SLOP;
+      pressedAt = null;
+      if (moved) return;
+
       if (!isPointConnected(element, point.dataset.role)) return;
       togglePipeEndpointDirection(element, point.dataset.role);
     });
   });
 }
 
-window.addEventListener('mousemove', (event) => {
+// Amb el punter capturat pel punt d'origen, aquests esdeveniments hi
+// arriben igualment i pugen fins aquí, també quan el cursor és fora de la
+// finestra. Si la captura no hagués funcionat, aquests gestors continuen
+// sent la xarxa de seguretat que tanca l'arrossegament.
+window.addEventListener('pointermove', (event) => {
   if (!pendingPipe) return;
   const a = getConnectionPointPosition(pendingPipe.fromElement, pendingPipe.fromRole);
   const b = clientToWorld(event.clientX, event.clientY);
   pendingPipe.previewPath.setAttribute('d', previewPipePath(a, b));
 });
 
-window.addEventListener('mouseup', (event) => {
+window.addEventListener('pointerup', (event) => {
   if (!pendingPipe) return;
+  finishPendingPipe(event);
+  cancelPendingPipe();
+});
 
-  const targetUnderCursor = document.elementFromPoint(event.clientX, event.clientY);
-  const targetPoint = targetUnderCursor && targetUnderCursor.closest('.connection-point');
-  const targetElement = targetPoint && targetPoint.closest('.pid-element');
-  const targetRole = targetPoint && targetPoint.dataset.role;
+// El sistema pot cancel·lar un arrossegament (canvi de finestra, gest del
+// dispositiu...). Llavors no es crea res, però la previsualització se'n va.
+window.addEventListener('pointercancel', cancelPendingPipe);
 
-  if (
-    targetElement
-    && targetElement !== pendingPipe.fromElement
-    && !isPointConnected(targetElement, targetRole)
-  ) {
-    const fromDir = getNaturalPortDirection(pendingPipe.fromElement, pendingPipe.fromRole);
-    const toDir = getNaturalPortDirection(targetElement, targetRole);
-    createPipe(pendingPipe.fromElement, pendingPipe.fromRole, fromDir, targetElement, targetRole, toDir);
-    pushHistory();
-  }
-
-  pendingPipe.previewPath.remove();
-  pendingPipe = null;
+// Escape cancel·la una canonada a mig fer, com qualsevol altra cosa a
+// mitges de l'aplicació.
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && pendingPipe) cancelPendingPipe();
 });
 
 // Connecta els botons de la barra d'eines amb la creació d'elements
@@ -1227,6 +1305,7 @@ function removePipe(pipeGroupOrPipe) {
 // Buida completament l'espai de treball: elimina tots els elements i
 // canonades del canvas i reinicia el comptador d'identificadors.
 function clearAll() {
+  cancelPendingPipe();
   pipes.length = 0;
   viewport.replaceChildren();
   elementCount = 0;
@@ -1823,11 +1902,25 @@ function updateRoleBadge(element) {
   reapplyElementTransform(element);
 }
 
-// Distintiu d'una bomba: el seu nom i, un cop detectat com està
-// connectada, si treballa per impulsió o per aspiració. Va dins del mateix
-// <g> que la forma, com el distintiu de rol, de manera que la segueix sense
-// cap manteniment (moure, copiar, esborrar, desfer).
-function updatePumpBadge(element, info) {
+// Text del distintiu: curt, com el dels rols (P1, C2, S3). El nom per
+// defecte "Bomba 3" es queda en "B3"; si l'usuari li ha posat un nom seu,
+// s'ensenya tal com l'ha escrit.
+//
+// El distintiu NO diu si la bomba treballa per impulsió o per aspiració, i
+// és a posta: això depèn d'on està connectada i canvia quan la mous, i un
+// text al diagrama que digués "aspiració" quan ja l'has canviada de lloc
+// enganyaria més que no ajudaria. Aquesta informació surt a la fitxa de la
+// bomba, que es calcula cada cop que s'obre.
+function pumpBadgeLabel(elementId) {
+  const name = pumpName(elementId);
+  const match = /^Bomba (\d+)$/.exec(name);
+  return match ? `B${match[1]}` : name;
+}
+
+// Distintiu d'una bomba, dins del mateix <g> que la forma (com el distintiu
+// de rol), de manera que la segueix sense cap manteniment: moure, copiar,
+// esborrar, desfer.
+function updatePumpBadge(element) {
   if (element.dataset.type !== PUMP_TYPE) return;
 
   let badge = element.querySelector('.pump-badge');
@@ -1839,19 +1932,17 @@ function updatePumpBadge(element, info) {
     element.appendChild(badge);
   }
 
-  const mode = info && info.mode ? PUMP_MODE_LABELS[info.mode] : '';
-  badge.textContent = mode
-    ? `${pumpName(element.dataset.id)} · ${mode}`
-    : pumpName(element.dataset.id);
-  badge.classList.toggle('pump-badge--unknown', !mode);
-  reapplyElementTransform(element);
+  badge.textContent = pumpBadgeLabel(element.dataset.id);
+
+  // Si l'element encara no té posició (s'acaba de crear), ja li tocarà
+  // setElementPosition, que és qui posa la contra-transformació al text.
+  if (element.transform.baseVal.numberOfItems) reapplyElementTransform(element);
 }
 
-// Refà els distintius de totes les bombes. Es crida quan es recalculen les
-// línies i quan es reconstrueix el canvas sencer.
+// Refà els distintius de totes les bombes. Es crida en reconstruir el
+// canvas sencer (desfer, refer, obrir un arxiu).
 function refreshPumpBadges() {
-  const pumps = detectPumps(buildTopology());
-  pumpElements().forEach((element) => updatePumpBadge(element, pumps[element.dataset.id]));
+  pumpElements().forEach((element) => updatePumpBadge(element));
 }
 
 // ---- Rutes de transport (derivades de la topologia) ----
@@ -2966,7 +3057,7 @@ function openPumpProcessPanel(element) {
     renderExtra: () => renderPumpConnection(info),
     onSave: (clean) => {
       ProcessModel.setElement(elementId, PUMP_TYPE, clean);
-      updatePumpBadge(element, info);
+      updatePumpBadge(element);
       if (!linesPanel.hidden) renderTransportLines();
     },
   });
@@ -3075,6 +3166,7 @@ function normalizeElementEntry(entry) {
 // una canonada apunta a un punt de connexió que ja no hi és, es descarta
 // només aquella peça i la resta del model s'obre igualment.
 function restoreState(state) {
+  cancelPendingPipe();
   pipes.length = 0;
   viewport.replaceChildren();
   clearSelection();

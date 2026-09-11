@@ -256,6 +256,13 @@ primer `Bomba N` lliure, perquè es veu al diagrama i al panell de línies
 abans que ningú n'obri la fitxa. A partir d'aquí és de l'usuari i no es
 torna a tocar.
 
+El distintiu del diagrama porta **només el nom, abreujat** (`Bomba 3` → `B3`;
+un nom propi s'ensenya tal com s'ha escrit). **No hi diu si treballa per
+impulsió o per aspiració**, i és a posta: això depèn d'on està connectada i
+canvia quan la mous, o sigui que un text enganxat a la forma es quedaria
+desfasat de seguida. Aquesta informació surt a la **fitxa** de la bomba, que
+es recalcula cada cop que s'obre.
+
 **Les línies ja no tenen nom.** El camp va desaparèixer de l'esquema
 (`SCHEMAS.line`) i el seu lloc a la interfície el fan servir les bombes; el
 que identifica una línia és el seu número. A la simulació, `line.name` de
@@ -266,6 +273,27 @@ usades per la seqüència que no en tenen cap.
 Els noms de línia desats per versions anteriors es queden a l'arxiu sense
 fer nosa: `writeEntry()` només escriu les claus de l'esquema, i cap pantalla
 no els llegeix.
+
+### Connectar canonades sense deixar-ne cap a mitges
+
+Arrossegar des d'un punt de connexió per fer una canonada nova fa servir
+**esdeveniments de punter amb captura** (`setPointerCapture`), igual que
+moure un element. És important: amb els esdeveniments de ratolí, deixar anar
+el botó fora de la finestra no arribava mai, i la línia discontínua de
+previsualització es quedava dibuixada **per sempre** — sense poder-la
+seleccionar ni esborrar, perquè no és cap element de debò.
+
+Tres xarxes de seguretat més, totes a `cancelPendingPipe()`:
+
+- començar un arrossegament nou tanca el que hi pugui haver a mitges;
+- **Escape** i `pointercancel` el cancel·len;
+- `clearAll()` i `restoreState()` també, i en acabar s'escombra qualsevol
+  `.pipe-path--preview` que hagi pogut quedar orfe.
+
+I un detall d'ús: prémer i deixar anar sobre un punt de connexió ja connectat
+canvia la direcció d'aquell extrem, però **només si el cursor no s'ha mogut**
+(`CONNECT_DRAG_SLOP`). Abans, intentar arrossegar des d'un punt ja connectat
+afegia un tram a la canonada existent sense voler.
 
 ## 5. Detecció de l'element d'emmagatzematge aigües amunt
 

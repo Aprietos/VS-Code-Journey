@@ -606,13 +606,6 @@ body {
   pointer-events: none;
 }
 
-/* Bomba que encara no està connectada de cap de les dues maneres que el
-   programa entén: no fa funcionar res, i es veu. */
-.pump-badge--unknown {
-  fill: var(--ui-text-muted);
-  font-weight: 500;
-}
-
 /* Ressaltat temporal del recorregut d'una línia. Només afegeix estil per
    sobre del que ja hi ha (no substitueix res), de manera que treure la
    classe deixa l'element exactament com estava. */
