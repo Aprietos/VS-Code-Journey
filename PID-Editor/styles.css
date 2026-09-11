@@ -1,35 +1,84 @@
+/* =====================================================================
+   Editor P&ID — sistema visual
+   =====================================================================
+
+   Dues famílies de color, i la separació entre elles és important:
+
+   1. TOKENS DE LA INTERFÍCIE (--ui-*). La pell de l'aplicació: capçalera,
+      barra d'eines, panells, botons, fons del canvas. Es poden canviar
+      lliurement; cap component ha de portar un color escrit a dins.
+
+   2. TOKENS DEL DIAGRAMA (--pid-*). Els colors dels símbols P&ID, de les
+      canonades i dels punts de connexió. NO ES TOQUEN: el dibuix ja està
+      fet i validat, i canviar-los voldria dir canviar el diagrama. Els
+      traços i els farciments dels símbols els decideix script.js
+      (LINE_STROKE, LINE_FILL, ACCENT); aquí només hi ha el que es pinta
+      des del CSS.
+
+   ===================================================================== */
+
 :root {
-  --bg: #faf9f5;
-  --bg-grid: #ece8dd;
-  --bg-panel: #f5f3ec;
-  --bg-panel-alt: #ffffff;
-  --bg-panel-alt-hover: #f0ede3;
-  --border: #e3ddce;
-  --text: #1f1b16;
-  --text-muted: #83786a;
-  --accent: #d97757;
-  --accent-hover: #c3624443;
-  --accent-contrast: #ffffff;
-  /* Variants fosques del mateix to, només per a TEXT petit: l'accent i el
-     gris apagats originals es queden per sota del 4.5:1 que demana la
-     WCAG AA sobre els fons clars (2.8:1 i 3.9:1 respectivament). Els
-     colors originals es mantenen intactes per a traços, vores i dibuix. */
-  --accent-text: #ad4e33;
-  --text-muted-strong: #736858;
-  --line: #3d3830;
-  --line-fill: #ffffff;
-  --input-color: #c3624a;
-  --output-color: #6a9873;
-  /* Punts que poden fer d'entrada o de sortida (vegeu .connection-point):
-     un groc del mateix to apagat que el vermell i el verd, per no cridar
-     més que ells. */
-  --reversible-color: #c9963a;
-  /* Avís d'element mal cablejat. És l'únic roig "d'error" de la paleta,
-     deliberadament fora de la gamma càlida de l'accent perquè no es pugui
-     confondre amb el ressaltat d'una ruta. */
-  --warn: #b4271d;
-  --pipe: #6b6355;
-  --handle: #d97757;
+  /* ---- Interfície: color ---- */
+  /* Blaus grisosos i mats. Paleta curta a propòsit: com menys colors,
+     més tranquil·la queda la pantalla i més destaca el diagrama. */
+  --ui-canvas: #f7f9fc;
+  --ui-canvas-dot: #d8e1ea;
+  --ui-surface: #ffffff;
+  --ui-sunken: #f2f6fa;
+  --ui-border: #dce3ec;
+  --ui-border-strong: #c9d4e0;
+  --ui-primary: #52728e;
+  --ui-primary-dark: #38566f;
+  --ui-primary-soft: #e9f1f6;
+  --ui-text: #26384a;
+  --ui-text-secondary: #647487;
+  --ui-text-muted: #94a3b3;
+  --ui-hover: #f0f5f8;
+  --ui-danger: #b4271d;
+  --ui-danger-soft: #fbeeed;
+
+  /* ---- Diagrama: color (NO TOCAR) ---- */
+  --pid-input: #c3624a;       /* punts d'entrada */
+  --pid-output: #6a9873;      /* punts de sortida */
+  --pid-reversible: #c9963a;  /* punts que poden ser les dues coses */
+  --pid-pipe: #6b6355;        /* canonades */
+  --pid-line: #3d3830;        /* traç dels símbols (còpia de script.js) */
+  --pid-fill: #ffffff;        /* farciment dels símbols (còpia de script.js) */
+
+  /* ---- Espaiat ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 28px;
+
+  /* ---- Cantonades ---- */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+
+  /* ---- Tipografia ---- */
+  /* Inter si l'ordinador la té instal·lada; si no, la millor tipografia
+     de sistema que hi hagi. No es carrega cap font de fora: l'aplicació
+     ha de continuar funcionant sense connexió, obrint el fitxer. */
+  --font: 'Inter', 'Inter var', 'Segoe UI Variable Text', 'Segoe UI',
+          system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --size-title: 20px;
+  --size-section: 12px;
+  --size-button: 13px;
+  --size-body: 13px;
+  --size-small: 12px;
+
+  /* ---- Ombres ---- */
+  /* Molt poques i molt suaus: només per separar del canvas el que hi
+     flota per sobre. La resta de la interfície és plana. */
+  --shadow-panel: 0 1px 2px rgba(38, 56, 74, 0.04), 0 6px 20px rgba(38, 56, 74, 0.08);
+  --shadow-popover: 0 1px 2px rgba(38, 56, 74, 0.05), 0 8px 24px rgba(38, 56, 74, 0.10);
+
+  /* ---- Transicions ---- */
+  --transition: 140ms ease;
+  --transition-slow: 180ms ease;
 }
 
 * {
@@ -39,218 +88,338 @@
 html, body {
   height: 100%;
   margin: 0;
-  font-family: 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif;
-  background: var(--bg);
+  background: var(--ui-canvas);
+  color: var(--ui-text);
+  font-family: var(--font);
+  font-size: var(--size-body);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
 }
 
 body {
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
-#toolbar {
-  display: flex;
-  flex-direction: column;
-  gap: 0.7rem;
-  padding: 0.9rem 1.4rem;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
-  color: var(--text);
-  max-height: 40vh;
-  overflow-y: auto;
+/* Les icones viuen en un sprite amagat a dalt del document i es fan servir
+   amb <use>. Així n'hi ha una sola còpia de cada una i totes comparteixen
+   gruix de traç i estil. */
+.icon-sprite {
+  display: none;
 }
 
-.toolbar-top {
-  display: flex;
+.icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon--chevron {
+  width: 13px;
+  height: 13px;
+  color: var(--ui-text-muted);
+  transition: transform var(--transition);
+}
+
+/* =====================================================================
+   Botons
+   ===================================================================== */
+
+/* Un sol botó base i variants. Cap botó no porta color propi: tot ve dels
+   tokens, de manera que canviar la paleta és canviar :root i prou. */
+.btn {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-#toolbar h1 {
-  font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', ui-serif, serif;
-  font-size: 1.15rem;
+  gap: var(--space-2);
+  height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ui-text);
+  font: inherit;
+  font-size: var(--size-button);
   font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--text);
-  margin: 0;
-}
-
-.toolbar-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.4rem;
-}
-
-#clear-all,
-#lines-toggle,
-#save-model {
-  padding: 0.4rem 0.85rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-panel-alt);
-  color: var(--text-muted-strong);
-  font-size: 0.82rem;
-  font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease,
-    box-shadow 0.12s ease;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
 }
 
-#clear-all:hover {
-  border-color: var(--output-color);
-  color: var(--output-color);
-  background: var(--bg-panel-alt-hover);
-  box-shadow: 0 1px 2px rgba(195, 98, 74, 0.15);
+.btn:hover {
+  background: var(--ui-hover);
 }
 
-#clear-all:active,
-#lines-toggle:active,
-#save-model:active {
-  background: var(--accent-hover);
+.btn:active {
+  background: var(--ui-primary-soft);
 }
 
-#lines-toggle:hover,
-#save-model:hover {
-  border-color: var(--accent);
-  color: var(--accent-text);
-  background: var(--bg-panel-alt-hover);
-  box-shadow: 0 1px 2px rgba(217, 119, 87, 0.15);
+.btn[disabled] {
+  color: var(--ui-text-muted);
+  cursor: not-allowed;
+  background: transparent;
 }
 
-/* Resultat de l'última acció de desar/obrir, sota els botons. */
-.toolbar-note {
-  margin: 0;
-  max-width: 15rem;
-  color: var(--text-muted-strong);
-  font-size: 0.72rem;
-  line-height: 1.3;
+.btn[disabled]:hover {
+  background: transparent;
 }
 
-.toolbar-note--error {
-  color: var(--accent-text);
+/* Vora visible: per als botons que han de llegir-se com a control. */
+.btn--outline {
+  border-color: var(--ui-border);
+  background: var(--ui-surface);
 }
 
-/* Desfer / Refer: parella minimalista de fletxes, a l'estil dels botons
-   "enrere"/"endavant" d'un navegador, ubicada sota "Neteja tot". */
-.history-controls {
-  display: flex;
-  gap: 0.35rem;
+.btn--outline:hover {
+  border-color: var(--ui-border-strong);
+  background: var(--ui-hover);
 }
 
-.history-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
+/* L'únic botó ple de tota la interfície. Un de sol: si n'hi hagués més,
+   cap no destacaria. */
+.btn--primary {
+  border-color: var(--ui-primary);
+  background: var(--ui-primary);
+  color: #fff;
+}
+
+.btn--primary:hover {
+  border-color: var(--ui-primary-dark);
+  background: var(--ui-primary-dark);
+}
+
+.btn--primary:active {
+  background: var(--ui-primary-dark);
+}
+
+/* Funcionalitat destacada sense cridar: fons suau i text del color
+   principal, en comptes d'un botó ple més. */
+.btn--feature {
+  border-color: transparent;
+  background: var(--ui-primary-soft);
+  color: var(--ui-primary-dark);
+  font-weight: 600;
+}
+
+.btn--feature:hover {
+  background: #dfebf3;
+}
+
+.btn--feature[disabled] {
+  background: var(--ui-sunken);
+  color: var(--ui-text-muted);
+}
+
+.btn--feature[disabled]:hover {
+  background: var(--ui-sunken);
+}
+
+/* Només icona. */
+.btn--icon {
+  width: 30px;
+  padding: 0;
   justify-content: center;
-  padding: 0.3rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-panel-alt);
-  color: var(--text-muted-strong);
-  cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease,
-    box-shadow 0.12s ease;
+  color: var(--ui-text-secondary);
 }
 
-.history-btn svg {
-  display: block;
+.btn--icon:hover {
+  color: var(--ui-text);
 }
 
-.history-btn:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent-text);
-  background: var(--bg-panel-alt-hover);
-  box-shadow: 0 1px 2px rgba(217, 119, 87, 0.15);
+/* Botons enganxats que es llegeixen com un sol control (desfer/refer). */
+.btn-group {
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--ui-sunken);
 }
 
-.history-btn:active:not(:disabled) {
-  background: var(--accent-hover);
+.btn-group .btn {
+  height: 26px;
+  width: 26px;
 }
 
-/* Apagat quan no hi ha res per desfer/refer. */
-.history-btn:disabled {
-  color: var(--border);
-  cursor: default;
-  opacity: 0.6;
+.btn-group .btn:hover {
+  background: var(--ui-surface);
+}
+
+/* Separador fi entre grups de controls. */
+.divider {
+  width: 1px;
+  height: 18px;
+  background: var(--ui-border);
+}
+
+/* =====================================================================
+   Capçalera
+   ===================================================================== */
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex: none;
+  height: 52px;
+  padding: 0 var(--space-4);
+  background: var(--ui-surface);
+}
+
+.app-header__title {
+  margin: 0;
+  font-size: var(--size-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ui-text);
+}
+
+.app-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+/* =====================================================================
+   Barra d'eines
+   ===================================================================== */
+
+/* Una sola línia de 44 px amb les categories a l'esquerra i les accions
+   de producte a la dreta. Els tipus d'element no hi són permanentment:
+   viuen dins del menú de la seva categoria, que és el que allibera
+   l'espai que abans ocupaven tres files de botons. */
+.app-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  min-height: 44px;
+  padding: 0 var(--space-4) var(--space-2);
+  background: var(--ui-surface);
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .tool-groups {
   display: flex;
+  align-items: center;
+  gap: var(--space-1);
   flex-wrap: wrap;
-  gap: 1.5rem;
+}
+
+.app-toolbar__end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
 }
 
 .tool-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-  padding: 0.65rem 0.75rem 0.75rem;
-  background: var(--bg-panel-alt);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  position: relative;
 }
 
-.tool-group__label {
-  font-family: inherit;
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--accent-text);
-  padding-bottom: 0.4rem;
-  border-bottom: 1px solid var(--border);
+.tool-group__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ui-text);
+  font: inherit;
+  font-size: var(--size-button);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.tool-group__trigger:hover {
+  background: var(--ui-hover);
+}
+
+.tool-group__trigger[aria-expanded="true"] {
+  background: var(--ui-primary-soft);
+  color: var(--ui-primary-dark);
+}
+
+.tool-group__trigger[aria-expanded="true"] .icon--chevron {
+  transform: rotate(180deg);
+  color: var(--ui-primary);
+}
+
+/* El menú d'una categoria. Flota per sobre del canvas, i per això és
+   l'únic lloc de la barra on hi ha ombra. */
+.tool-group__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 900;
+  min-width: 200px;
+  padding: var(--space-1);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--radius-lg);
+  background: var(--ui-surface);
+  box-shadow: var(--shadow-popover);
+  animation: popover-in 120ms ease;
+}
+
+.tool-group__menu[hidden] {
+  display: none;
+}
+
+@keyframes popover-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .tools {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  max-width: 520px;
+  flex-direction: column;
 }
 
 .tools button {
-  padding: 0.4rem 0.85rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-panel);
-  color: var(--text);
-  font-size: 0.82rem;
-  font-weight: 500;
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ui-text);
+  font: inherit;
+  font-size: var(--size-body);
+  text-align: left;
   cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease,
-    box-shadow 0.12s ease;
+  transition: background var(--transition), color var(--transition);
 }
 
 .tools button:hover {
-  border-color: var(--accent);
-  color: var(--accent-text);
-  background: var(--bg-panel-alt-hover);
-  box-shadow: 0 1px 2px rgba(217, 119, 87, 0.15);
+  background: var(--ui-hover);
+  color: var(--ui-primary-dark);
 }
 
-.tools button:active {
-  background: var(--accent-hover);
-}
+/* =====================================================================
+   Canvas
+   ===================================================================== */
 
 #canvas-container {
+  position: relative;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
-  background: var(--bg);
-  background-image:
-    linear-gradient(to right, var(--bg-grid) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--bg-grid) 1px, transparent 1px);
-  background-size: 20px 20px;
-}
-
-/* Arrossegar un arxiu de model per sobre del canvas: es marca tot l'espai
-   com a zona on es pot deixar anar. El contorn va per dins (inset) perquè
-   no desplaci ni el canvas ni la quadrícula. */
-#canvas-container.drop-target {
-  box-shadow: inset 0 0 0 2px var(--accent);
-  background-color: var(--bg-panel-alt-hover);
+  background-color: var(--ui-canvas);
+  /* Malla de punts, no quadrícula: marca la referència sense dibuixar cap
+     línia que competeixi amb el diagrama. La mida i la posició del patró
+     les mou applyViewport() a cada pan i a cada zoom, de manera que els
+     punts sempre queden clavats al contingut. */
+  background-image: radial-gradient(circle at center, var(--ui-canvas-dot) 1px, transparent 1px);
+  background-repeat: repeat;
+  transition: background-color var(--transition);
 }
 
 #canvas {
@@ -261,6 +430,77 @@ body {
 #canvas.panning {
   cursor: grabbing;
 }
+
+/* Arrossegar un arxiu de model per sobre del canvas. El contorn va per
+   dins perquè no desplaci ni el canvas ni la malla. */
+#canvas-container.drop-target {
+  background-color: var(--ui-primary-soft);
+  box-shadow: inset 0 0 0 2px var(--ui-primary);
+}
+
+/* Controls de navegació: una barra petita flotant a baix a la dreta,
+   separada de la barra d'eines principal perquè són d'una altra mena de
+   cosa (mirar el diagrama, no editar-lo). */
+.canvas-controls {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-1);
+  gap: 2px;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--radius-lg);
+  background: var(--ui-surface);
+  box-shadow: var(--shadow-panel);
+}
+
+.canvas-controls .btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  justify-content: center;
+  color: var(--ui-text-secondary);
+}
+
+.canvas-controls .btn:hover {
+  color: var(--ui-primary-dark);
+  background: var(--ui-hover);
+}
+
+/* Resultat de l'última acció de desar o obrir. Va al canvas i no a la
+   capçalera perquè la capçalera es mantingui neta i de mida fixa. */
+.file-note {
+  position: absolute;
+  left: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 400;
+  max-width: 22rem;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--radius-md);
+  background: var(--ui-surface);
+  box-shadow: var(--shadow-panel);
+  color: var(--ui-text-secondary);
+  font-size: var(--size-small);
+  animation: popover-in 160ms ease;
+}
+
+.file-note[hidden] {
+  display: none;
+}
+
+/* =====================================================================
+   Diagrama P&ID  —  NO TOCAR
+   ---------------------------------------------------------------------
+   Tot el que hi ha en aquest bloc dibuixa el diagrama. Els colors, els
+   gruixos i les mides són els de sempre i s'han de quedar com estan.
+   L'única cosa que ha canviat és el color del halo dels punts i de les
+   nanses: el seu paper és fondre's amb el fons del canvas, així que
+   segueix el fons, sigui quin sigui.
+   ===================================================================== */
 
 .pid-element {
   cursor: grab;
@@ -273,7 +513,7 @@ body {
 /* Punt de connexió: un únic cercle amb fill sòlid, perquè tota la seva
    àrea (no només la vora) respongui al clic. */
 .connection-point {
-  stroke: var(--bg);
+  stroke: var(--ui-canvas);
   stroke-width: 1.5;
   cursor: crosshair;
 }
@@ -282,11 +522,11 @@ body {
    punts d'entrada o sortida tingui l'element; el selector per prefix els
    agafa tots amb un únic color per família. */
 .connection-point[data-role^="input"] {
-  fill: var(--input-color);
+  fill: var(--pid-input);
 }
 
 .connection-point[data-role^="output"] {
-  fill: var(--output-color);
+  fill: var(--pid-output);
 }
 
 /* Tercera família: els elements que no tenen un sentit de flux fix (la
@@ -297,11 +537,11 @@ body {
    sentits. Vegeu connectionOffsets i PORT_SIDES a script.js. */
 .connection-point[data-role="common"],
 .connection-point[data-role^="branch"] {
-  fill: var(--reversible-color);
+  fill: var(--pid-reversible);
 }
 
 .connection-point:hover {
-  fill: var(--accent);
+  fill: var(--ui-primary);
 }
 
 /* Punt ja connectat a una canonada: no s'hi pot iniciar ni acabar una
@@ -313,26 +553,75 @@ body {
 
 .pipe-path {
   fill: none;
-  stroke: var(--pipe);
+  stroke: var(--pid-pipe);
   stroke-width: 1.75;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
 .pipe-path--preview {
-  stroke: var(--accent);
+  stroke: var(--ui-primary);
   stroke-dasharray: 5 4;
   /* Evita que la línia de previsualització "tapi" el punt de connexió
      de destí quan el cursor hi passa just per sobre en soltar el ratolí. */
   pointer-events: none;
 }
 
+.pipe-handle {
+  fill: var(--ui-primary);
+  stroke: var(--ui-canvas);
+  stroke-width: 1;
+  cursor: ew-resize;
+}
+
+.pipe-handle--vertical {
+  cursor: ns-resize;
+}
+
+/* Distintiu del rol (P1, C2...) dibuixat al costat de l'element. El traç
+   del mateix color que el fons, pintat per sota del farciment amb
+   paint-order, li fa d'halo perquè es llegeixi sobre la malla. */
+.role-badge {
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--ui-primary-dark);
+  stroke: var(--ui-canvas);
+  stroke-width: 3;
+  paint-order: stroke;
+  pointer-events: none;
+}
+
+/* Ressaltat temporal del recorregut d'una línia. Només afegeix estil per
+   sobre del que ja hi ha (no substitueix res), de manera que treure la
+   classe deixa l'element exactament com estava. */
+.pipe-path--highlight {
+  stroke: var(--ui-primary);
+  stroke-width: 3.25;
+}
+
+.pid-element--highlight {
+  filter: drop-shadow(0 0 3px var(--ui-primary));
+}
+
+/* Avís d'element que, pel cablejat, no pot conduir producte: totes les seves
+   canonades van al mateix costat (vegeu findBlockedElements). Es marca amb
+   una aura roja doble, prou diferent del ressaltat d'una ruta, i es posa i
+   es treu amb la mateixa lògica de "només afegir estil" que el ressaltat. */
+.pid-element--blocked {
+  filter: drop-shadow(0 0 2px var(--ui-danger)) drop-shadow(0 0 6px var(--ui-danger));
+}
+
+/* =====================================================================
+   Selecció i manipulació
+   ===================================================================== */
+
 /* Marc de selecció: un requadre HTML (no SVG) posicionat amb
-   getBoundingClientRect() sobre l'element seleccionat, a l'estil d'una
-   imatge seleccionada en un editor de text. */
+   getBoundingClientRect() sobre l'element seleccionat. */
 .selection-frame {
   position: fixed;
-  border: 1.5px dashed var(--accent);
+  border: 1px solid var(--ui-primary);
+  border-radius: 2px;
   pointer-events: none;
   z-index: 500;
 }
@@ -341,22 +630,22 @@ body {
    buit del canvas, per seleccionar tots els elements que hi caiguin dins. */
 .marquee-select {
   position: fixed;
-  border: 1px solid var(--accent);
-  background: rgba(217, 119, 87, 0.12);
+  border: 1px solid var(--ui-primary);
+  border-radius: 2px;
+  background: rgba(82, 114, 142, 0.10);
   pointer-events: none;
   z-index: 500;
 }
 
 .resize-handle {
   position: absolute;
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   transform: translate(-50%, -50%);
-  background: var(--accent);
-  border: 1.5px solid var(--accent-contrast);
+  background: var(--ui-surface);
+  border: 1.5px solid var(--ui-primary);
   border-radius: 2px;
   pointer-events: auto;
-  box-shadow: 0 1px 2px rgba(61, 56, 48, 0.25);
 }
 
 .resize-handle--nw,
@@ -374,55 +663,51 @@ body {
 .resize-handle--sw { left: 0; top: 100%; }
 .resize-handle--se { left: 100%; top: 100%; }
 
-.pipe-handle {
-  fill: var(--handle);
-  stroke: var(--bg);
-  stroke-width: 1;
-  cursor: ew-resize;
-}
+/* =====================================================================
+   Panells flotants
+   ===================================================================== */
 
-.pipe-handle--vertical {
-  cursor: ns-resize;
-}
-
-/* Distintiu del rol (P1, C2...) dibuixat al costat de l'element. El traç
-   del mateix color que el fons, pintat per sota del farciment amb
-   paint-order, li fa d'halo perquè es llegeixi sobre la quadrícula. */
-.role-badge {
-  font-family: 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif;
-  font-size: 11px;
-  font-weight: 600;
-  fill: var(--accent-text);
-  stroke: var(--bg);
-  stroke-width: 3;
-  paint-order: stroke;
-  pointer-events: none;
-}
-
-/* ---- Panell de línies de transport ---- */
-#lines-panel {
+/* Els dos panells comparteixen la mateixa targeta: una superfície neta,
+   una vora d'1 px i una ombra suau que la separa del canvas. Res més. */
+#lines-panel,
+#process-panel {
   position: fixed;
-  top: 50%;
-  right: 16px;
-  transform: translateY(-50%);
-  z-index: 900;
+  z-index: 800;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: var(--space-3);
   width: 300px;
-  max-height: 70vh;
-  padding: 0.85rem;
-  background: var(--bg-panel-alt);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(61, 56, 48, 0.15);
-  font-size: 0.82rem;
-  color: var(--text);
+  padding: var(--space-4);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--radius-lg);
+  background: var(--ui-surface);
+  box-shadow: var(--shadow-panel);
+  font-size: var(--size-body);
+  color: var(--ui-text);
+}
+
+#lines-panel {
+  top: 50%;
+  right: var(--space-4);
+  transform: translateY(-50%);
+  max-height: 72vh;
+}
+
+/* Ancorat a baix i no centrat verticalment com el de línies: aquest panell
+   és més alt (hi caben quatre camps i el bloc d'origen) i centrat arribaria
+   a tapar la barra d'eines. */
+#process-panel {
+  left: var(--space-4);
+  bottom: var(--space-4);
+  width: 292px;
+  max-height: 64vh;
+  overflow-y: auto;
 }
 
 /* Cal ser explícit: el display:flex de sobre guanyaria a la regla
    [hidden] { display: none } del navegador. */
-#lines-panel[hidden] {
+#lines-panel[hidden],
+#process-panel[hidden] {
   display: none;
 }
 
@@ -430,59 +715,78 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--border);
+  gap: var(--space-2);
 }
 
 .lines-panel__title {
   margin: 0;
-  font-size: 0.7rem;
+  font-size: var(--size-section);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--accent-text);
+  letter-spacing: 0.02em;
+  color: var(--ui-text-secondary);
 }
 
 .lines-panel__close {
-  padding: 0 0.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   border: none;
+  border-radius: var(--radius-sm);
   background: none;
-  color: var(--text-muted-strong);
-  font-size: 1rem;
-  line-height: 1;
+  color: var(--ui-text-muted);
   cursor: pointer;
+  transition: background var(--transition), color var(--transition);
 }
 
 .lines-panel__close:hover {
-  color: var(--accent-text);
+  background: var(--ui-hover);
+  color: var(--ui-text);
 }
 
 .lines-panel__recalc {
-  padding: 0.35rem 0.85rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-panel);
-  color: var(--text);
-  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--radius-sm);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  font: inherit;
+  font-size: var(--size-button);
   font-weight: 500;
   cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
 }
 
 .lines-panel__recalc:hover {
-  border-color: var(--accent);
-  color: var(--accent-text);
-  background: var(--bg-panel-alt-hover);
+  border-color: var(--ui-border-strong);
+  background: var(--ui-hover);
 }
 
 .lines-panel__note {
   margin: 0;
-  padding: 0.45rem 0.6rem;
-  border-radius: 6px;
-  background: var(--bg-panel);
-  color: var(--text-muted-strong);
-  font-size: 0.76rem;
-  line-height: 1.35;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--ui-sunken);
+  color: var(--ui-text-secondary);
+  font-size: var(--size-small);
+  line-height: 1.4;
+}
+
+.lines-panel__note[hidden] {
+  display: none;
+}
+
+/* Avisos i errors: el mateix bloc, en vermell. */
+.toolbar-note--error {
+  background: var(--ui-danger-soft);
+  color: var(--ui-danger);
 }
 
 .lines-panel__list {
@@ -492,74 +796,81 @@ body {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-}
-
-.line-item {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-panel);
-  color: inherit;
-  font: inherit;
-  font-size: 0.82rem;
-  text-align: left;
-  cursor: pointer;
-}
-
-.line-item:hover,
-.line-item.is-pinned {
-  border-color: var(--accent);
-  background: var(--bg-panel-alt-hover);
-}
-
-.line-item__title {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  align-items: baseline;
-}
-
-.line-item__number {
-  font-weight: 600;
-  color: var(--accent-text);
-}
-
-.line-item__pair {
-  color: var(--text);
-}
-
-.line-item__path {
-  margin-top: 0.2rem;
-  color: var(--text-muted-strong);
-  font-size: 0.76rem;
-  line-height: 1.35;
-}
-
-/* Text de configuració de procés a cada entrada de la llista: el nom i els
-   paràmetres de la línia, o l'avís que encara no en té cap. */
-.line-item__setup {
-  margin-top: 0.2rem;
-  font-size: 0.74rem;
-  color: var(--text);
-}
-
-.line-item__setup--empty {
-  color: var(--text-muted-strong);
-  font-style: italic;
+  gap: var(--space-1);
 }
 
 /* Encapçalament dels apartats secundaris dels panells. */
 .lines-panel__subtitle {
   margin: 0;
-  font-size: 0.7rem;
+  font-size: var(--size-section);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted-strong);
+  letter-spacing: 0.02em;
+  color: var(--ui-text-secondary);
+}
+
+/* =====================================================================
+   Llista de línies de transport
+   ===================================================================== */
+
+/* Cada entrada és un botó de debò (tabulable i activable amb el teclat),
+   sense vora: el que la separa de la següent és l'espai, no una caixa. */
+.line-item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--size-body);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.line-item:hover {
+  background: var(--ui-hover);
+}
+
+.line-item.is-pinned {
+  border-color: var(--ui-primary);
+  background: var(--ui-primary-soft);
+}
+
+.line-item__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.line-item__number {
+  font-weight: 600;
+  color: var(--ui-primary-dark);
+}
+
+.line-item__pair {
+  color: var(--ui-text);
+}
+
+.line-item__path {
+  margin-top: 2px;
+  color: var(--ui-text-muted);
+  font-size: var(--size-small);
+  line-height: 1.35;
+}
+
+/* Configuració de procés de la línia, o l'avís que encara no en té. */
+.line-item__setup {
+  margin-top: var(--space-1);
+  color: var(--ui-text-secondary);
+  font-size: var(--size-small);
+}
+
+.line-item__setup--empty {
+  color: var(--ui-text-muted);
+  font-style: italic;
 }
 
 /* Configuracions que ja no corresponen a cap línia detectada. El contorn
@@ -568,9 +879,9 @@ body {
 .lines-panel__orphans {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--border);
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--ui-border);
 }
 
 .lines-panel__orphans[hidden] {
@@ -581,11 +892,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.4rem;
-  padding: 0.35rem 0.5rem;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-  background: var(--bg-panel);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--ui-border-strong);
+  border-radius: var(--radius-md);
 }
 
 .orphan-item__text {
@@ -595,114 +905,99 @@ body {
 }
 
 .orphan-item__name {
-  font-size: 0.78rem;
+  font-size: var(--size-small);
 }
 
 .orphan-item__pair {
-  font-size: 0.72rem;
-  color: var(--text-muted-strong);
+  color: var(--ui-text-muted);
+  font-size: var(--size-small);
 }
 
 .orphan-item__remove {
   flex: none;
-  padding: 0.2rem 0.45rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-panel-alt);
-  color: var(--text-muted-strong);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ui-text-muted);
   font: inherit;
-  font-size: 0.72rem;
+  font-size: var(--size-small);
   cursor: pointer;
+  transition: background var(--transition), color var(--transition);
 }
 
 .orphan-item__remove:hover {
-  border-color: var(--warn);
-  color: var(--warn);
+  background: var(--ui-danger-soft);
+  color: var(--ui-danger);
 }
 
-/* ---- Panell de configuració de procés ---- */
-/* Mateixa targeta que el panell de línies de transport, a l'altre costat de
-   la pantalla perquè els dos puguin estar oberts alhora sense tapar-se. */
-#process-panel {
-  position: fixed;
-  /* Ancorat a baix i no centrat verticalment com el de línies: aquest
-     panell és més alt (hi caben quatre camps i el bloc d'origen) i centrat
-     arribaria a tapar la barra d'eines. */
-  bottom: 16px;
-  left: 16px;
-  z-index: 900;
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  width: 290px;
-  max-height: 62vh;
-  overflow-y: auto;
-  padding: 0.85rem;
-  background: var(--bg-panel-alt);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(61, 56, 48, 0.15);
-  font-size: 0.82rem;
-  color: var(--text);
-}
+/* =====================================================================
+   Panell de configuració de procés
+   ===================================================================== */
 
-#process-panel[hidden] {
-  display: none;
-}
-
-/* De qui és la fitxa que s'està editant (tipus d'element i distintiu). */
 .process-panel__subject {
   margin: 0;
-  color: var(--text-muted-strong);
-  font-size: 0.76rem;
+  color: var(--ui-text-muted);
+  font-size: var(--size-small);
 }
 
 .process-panel__form {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--space-3);
 }
 
 .process-field {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: var(--space-1);
 }
 
 /* La unitat va dins de l'etiqueta, enganxada al nom del camp. */
 .process-field__label {
-  color: var(--text-muted-strong);
-  font-size: 0.72rem;
+  color: var(--ui-text-secondary);
+  font-size: var(--size-small);
 }
 
 .process-field__input {
   width: 100%;
-  padding: 0.3rem 0.45rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-panel);
-  color: var(--text);
+  height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--radius-sm);
+  background: var(--ui-surface);
+  color: var(--ui-text);
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--size-body);
+  transition: border-color var(--transition), box-shadow var(--transition);
 }
 
-.process-field__input:focus-visible {
-  outline: 2px solid var(--accent-text);
-  outline-offset: 1px;
+.process-field__input:hover {
+  border-color: var(--ui-border-strong);
+}
+
+.process-field__input:focus {
+  outline: none;
+  border-color: var(--ui-primary);
+  box-shadow: 0 0 0 3px var(--ui-primary-soft);
 }
 
 .process-field__input--invalid {
-  border-color: var(--warn);
+  border-color: var(--ui-danger);
 }
 
-/* Bloc d'origen del producte d'un punt de recollida: resultat de la
-   detecció, recorregut seguit, selector i botó de tornar a detectar. */
+select.process-field__input {
+  padding-right: var(--space-2);
+  cursor: pointer;
+}
+
+/* Bloc d'origen del producte d'un punt de recollida. */
 .process-panel__source {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--border);
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--ui-border);
 }
 
 .process-panel__source[hidden] {
@@ -711,98 +1006,132 @@ body {
 
 .process-panel__state {
   margin: 0;
-  font-size: 0.76rem;
-  line-height: 1.35;
+  font-size: var(--size-small);
+  line-height: 1.4;
 }
 
 /* Sense origen detectat o amb més d'un candidat: cal que es vegi que
    demana una decisió, no que ja estigui resolt. */
 .process-panel__state--warn {
-  color: var(--accent-text);
+  color: var(--ui-danger);
 }
 
 .process-panel__route {
   margin: 0;
-  color: var(--text-muted-strong);
-  font-size: 0.72rem;
-  line-height: 1.35;
+  color: var(--ui-text-muted);
+  font-size: var(--size-small);
+  line-height: 1.4;
 }
 
 .process-panel__actions {
   display: flex;
-  gap: 0.4rem;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .process-panel__cancel {
-  padding: 0.35rem 0.85rem;
+  padding: 0 var(--space-3);
+  height: 30px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: none;
-  color: var(--text-muted-strong);
+  color: var(--ui-text-secondary);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--size-button);
   cursor: pointer;
+  transition: background var(--transition), color var(--transition);
 }
 
 .process-panel__cancel:hover {
-  border-color: var(--border);
-  color: var(--text);
+  background: var(--ui-hover);
+  color: var(--ui-text);
 }
 
-/* Ressaltat temporal del recorregut d'una línia. Només afegeix estil per
-   sobre del que ja hi ha (no substitueix res), de manera que treure la
-   classe deixa l'element exactament com estava. */
-.pipe-path--highlight {
-  stroke: var(--accent);
-  stroke-width: 3.25;
-}
-
-.pid-element--highlight {
-  filter: drop-shadow(0 0 3px var(--accent));
-}
-
-/* Avís d'element que, pel cablejat, no pot conduir producte: totes les seves
-   canonades van al mateix costat (vegeu findBlockedElements). Es marca amb
-   una aura roja doble, prou diferent del ressaltat d'una ruta, i es posa i
-   es treu amb la mateixa lògica de "només afegir estil" que el ressaltat. */
-.pid-element--blocked {
-  filter: drop-shadow(0 0 2px var(--warn)) drop-shadow(0 0 6px var(--warn));
-}
-
-/* Focus visible per a qui navega amb el teclat. Es fa servir
-   :focus-visible i no :focus perquè el ratolí no deixi anells de focus
-   pel mig; l'aplicació no en tenia cap de visible. */
-button:focus-visible,
-.context-menu li:focus-visible {
-  outline: 2px solid var(--accent-text);
-  outline-offset: 2px;
-}
-
-.context-menu li:focus-visible {
-  outline-offset: -2px;
-}
+/* =====================================================================
+   Menú contextual
+   ===================================================================== */
 
 .context-menu {
   position: fixed;
   z-index: 1000;
-  min-width: 170px;
+  min-width: 190px;
   margin: 0;
-  padding: 4px 0;
+  padding: var(--space-1);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--radius-lg);
+  background: var(--ui-surface);
+  box-shadow: var(--shadow-popover);
   list-style: none;
-  background: var(--bg-panel-alt);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(61, 56, 48, 0.15);
-  font-size: 0.85rem;
-  color: var(--text);
+  font-size: var(--size-body);
+  animation: popover-in 120ms ease;
 }
 
 .context-menu li {
-  padding: 0.5rem 1rem;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--ui-text);
   cursor: pointer;
+  transition: background var(--transition), color var(--transition);
 }
 
 .context-menu li:hover {
-  background: var(--bg-panel-alt-hover);
-  color: var(--accent-text);
+  background: var(--ui-hover);
+  color: var(--ui-primary-dark);
+}
+
+/* =====================================================================
+   Focus
+   ===================================================================== */
+
+/* :focus-visible i no :focus, perquè el ratolí no deixi anells de focus
+   pel mig i qui navega amb el teclat sempre sàpiga on és. */
+button:focus-visible,
+.context-menu li:focus-visible,
+.tools button:focus-visible {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: 2px;
+}
+
+.context-menu li:focus-visible,
+.tools button:focus-visible {
+  outline-offset: -2px;
+}
+
+/* =====================================================================
+   Finestres estretes
+   ===================================================================== */
+
+/* La capçalera i la barra d'eines poden fer dues línies, però no poden
+   créixer sense mesura: el canvas ha de continuar sent la zona principal. */
+@media (max-width: 860px) {
+  .app-header {
+    height: auto;
+    flex-wrap: wrap;
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .app-header__actions {
+    margin-left: auto;
+  }
+
+  .app-toolbar {
+    flex-wrap: wrap;
+    padding: 0 var(--space-3) var(--space-2);
+  }
+
+  .app-toolbar__end {
+    margin-left: 0;
+  }
+
+  #lines-panel,
+  #process-panel {
+    width: min(300px, calc(100vw - var(--space-5)));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
 }

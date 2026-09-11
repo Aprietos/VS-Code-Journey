@@ -25,12 +25,24 @@ const MIN_VIEW_SCALE = 0.2;
 const MAX_VIEW_SCALE = 4;
 const GRID_SIZE = 20;
 
+// Separació de la malla de punts del fons, en píxels de pantalla. Quan el
+// zoom deixaria els punts massa junts, es dobla: com que es DOBLA (i no un
+// factor qualsevol), els punts que queden són sempre un subconjunt dels
+// mateixos i, per tant, continuen clavats al contingut.
+const MIN_DOT_SPACING = 11;
+
+function dotSpacing() {
+  let spacing = GRID_SIZE * viewScale;
+  while (spacing < MIN_DOT_SPACING) spacing *= 2;
+  return spacing;
+}
+
 function applyViewport() {
   viewport.setAttribute('transform', `translate(${viewX}, ${viewY}) scale(${viewScale})`);
-  // La quadrícula de fons és CSS, no SVG: cal moure-la/escalar-la a mà
-  // perquè continuï alineada amb el contingut.
-  const size = GRID_SIZE * viewScale;
-  canvasContainer.style.backgroundSize = `${size}px ${size}px`;
+  // La malla de punts del fons és CSS, no SVG: cal moure-la i espaiar-la a
+  // mà perquè continuï alineada amb el contingut.
+  const spacing = dotSpacing();
+  canvasContainer.style.backgroundSize = `${spacing}px ${spacing}px`;
   canvasContainer.style.backgroundPosition = `${viewX}px ${viewY}px`;
 }
 
@@ -1116,6 +1128,47 @@ toolbar.addEventListener('click', (event) => {
   const button = event.target.closest('button[data-tool]');
   if (!button) return;
   addElement(button.dataset.tool);
+  closeToolMenus();
+});
+
+// ---- Menús de categoria de la barra d'eines ----
+// Cada categoria obre el seu menú en comptes de tenir tots els seus
+// elements permanentment a la vista. Els botons [data-tool] continuen
+// vivint dins de .tool-groups encara que el menú estigui amagat, de manera
+// que la delegació de clics de just aquí sobre i typeLabel() no han de
+// saber res d'aquests menús.
+const toolGroups = [...document.querySelectorAll('.tool-group')];
+
+function closeToolMenus(except) {
+  toolGroups.forEach((group) => {
+    if (group === except) return;
+    group.querySelector('.tool-group__trigger').setAttribute('aria-expanded', 'false');
+    group.querySelector('.tool-group__menu').hidden = true;
+  });
+}
+
+toolGroups.forEach((group) => {
+  const trigger = group.querySelector('.tool-group__trigger');
+  const menu = group.querySelector('.tool-group__menu');
+
+  trigger.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const opening = menu.hidden;
+    // Només un menú obert alhora: obrir-ne un tanca els altres.
+    closeToolMenus(group);
+    menu.hidden = !opening;
+    trigger.setAttribute('aria-expanded', String(opening));
+  });
+});
+
+// Clicar fora o prémer Escape tanca el que hi hagi obert, com qualsevol
+// altre menú de l'aplicació.
+window.addEventListener('mousedown', (event) => {
+  if (!event.target.closest('.tool-group')) closeToolMenus();
+});
+
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeToolMenus();
 });
 
 // Elimina un element del canvas. Si és un dipòsit, bomba o vàlvula,
@@ -1403,6 +1456,50 @@ canvas.addEventListener('wheel', (event) => {
   viewY = mouseY - worldY * viewScale;
   applyViewport();
 }, { passive: false });
+
+// ---- Controls de navegació del canvas ----
+// Fan el mateix que la roda del ratolí, però prenent com a punt fix el
+// centre de la vista en lloc del cursor: és el que s'espera d'un botó.
+function zoomBy(factor) {
+  const rect = canvas.getBoundingClientRect();
+  const centerX = rect.width / 2;
+  const centerY = rect.height / 2;
+  const worldX = (centerX - viewX) / viewScale;
+  const worldY = (centerY - viewY) / viewScale;
+
+  viewScale = Math.min(MAX_VIEW_SCALE, Math.max(MIN_VIEW_SCALE, viewScale * factor));
+  viewX = centerX - worldX * viewScale;
+  viewY = centerY - worldY * viewScale;
+  applyViewport();
+}
+
+// Enquadra tot el que hi ha dibuixat. La caixa la dona el mateix SVG
+// (getBBox del grup que conté tot el contingut), de manera que no cal
+// repassar element per element ni saber res de la forma de cadascun; com
+// que es demana al grup ABANS del seu transform, ja ve en coordenades de
+// món, que és el que necessiten viewX/viewY.
+function zoomToFit() {
+  if (!viewport.childNodes.length) return;
+
+  const box = viewport.getBBox();
+  if (!box.width || !box.height) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const margin = 56;
+  const scale = Math.min(
+    (rect.width - margin * 2) / box.width,
+    (rect.height - margin * 2) / box.height,
+  );
+
+  viewScale = Math.min(MAX_VIEW_SCALE, Math.max(MIN_VIEW_SCALE, scale));
+  viewX = rect.width / 2 - (box.x + box.width / 2) * viewScale;
+  viewY = rect.height / 2 - (box.y + box.height / 2) * viewScale;
+  applyViewport();
+}
+
+document.getElementById('zoom-in').addEventListener('click', () => zoomBy(1.2));
+document.getElementById('zoom-out').addEventListener('click', () => zoomBy(1 / 1.2));
+document.getElementById('zoom-fit').addEventListener('click', zoomToFit);
 
 // ---- Desplaçament (pan) arrossegant amb el botó del mig ----
 // Es pot iniciar en qualsevol punt del canvas (fins i tot sobre un element)

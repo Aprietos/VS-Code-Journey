@@ -7,64 +7,179 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header id="toolbar">
-    <div class="toolbar-top">
-      <h1>Editor P&amp;ID</h1>
-      <div class="toolbar-actions">
-        <button id="clear-all" type="button">Neteja tot</button>
-        <div class="history-controls">
-          <button id="undo-btn" type="button" class="history-btn" title="Desfer" aria-label="Desfer" disabled>
-            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-              <path d="M19 12H5M11 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
-          <button id="redo-btn" type="button" class="history-btn" title="Refer" aria-label="Refer" disabled>
-            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-              <path d="M5 12h14M13 18l6-6-6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
-        </div>
-        <button id="save-model" type="button" title="Desa el model en un arxiu .pid.json (Ctrl+S). Per obrir-lo, arrossega'l sobre el canvas.">Desa el model</button>
-        <button id="lines-toggle" type="button" aria-expanded="false" aria-controls="lines-panel">Línies de transport</button>
-        <!-- Resultat de desar/obrir: s'anuncia sol als lectors de pantalla. -->
-        <p id="file-note" class="toolbar-note" role="status" aria-live="polite" hidden></p>
+  <!-- Joc d'icones de la interfície. Totes comparteixen caixa (24×24),
+       gruix de traç i acabat rodó, de manera que es llegeixen com una sola
+       família. NO hi ha cap icona de símbol P&ID: els símbols del diagrama
+       els dibuixa script.js i no es toquen des d'aquí. -->
+  <svg class="icon-sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-undo" viewBox="0 0 24 24">
+      <path d="M9 14 4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" />
+    </symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24">
+      <path d="m15 14 5-5-5-5" /><path d="M20 9H10a6 6 0 0 0 0 12h3" />
+    </symbol>
+    <symbol id="i-save" viewBox="0 0 24 24">
+      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
+      <path d="M17 21v-8H7v8" /><path d="M7 3v5h7" />
+    </symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24">
+      <path d="M4 7h16" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+      <path d="m6 7 1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" />
+    </symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24">
+      <path d="m6 9 6 6 6-6" />
+    </symbol>
+    <symbol id="i-close" viewBox="0 0 24 24">
+      <path d="M6 6 18 18" /><path d="M18 6 6 18" />
+    </symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24">
+      <path d="M12 5v14" /><path d="M5 12h14" />
+    </symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24">
+      <path d="M5 12h14" />
+    </symbol>
+    <symbol id="i-fit" viewBox="0 0 24 24">
+      <path d="M4 9V6a2 2 0 0 1 2-2h3" /><path d="M15 4h3a2 2 0 0 1 2 2v3" />
+      <path d="M20 15v3a2 2 0 0 1-2 2h-3" /><path d="M9 20H6a2 2 0 0 1-2-2v-3" />
+    </symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 1.8" />
+    </symbol>
+    <symbol id="i-routes" viewBox="0 0 24 24">
+      <circle cx="6" cy="12" r="2.5" /><circle cx="18" cy="6" r="2.5" />
+      <circle cx="18" cy="18" r="2.5" />
+      <path d="m8.3 10.8 7.4-3.6" /><path d="m8.3 13.2 7.4 3.6" />
+    </symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24">
+      <path d="M20 11a8 8 0 0 0-13.7-5.2L3 9" /><path d="M3 4v5h5" />
+      <path d="M4 13a8 8 0 0 0 13.7 5.2L21 15" /><path d="M21 20v-5h-5" />
+    </symbol>
+  </svg>
+
+  <!-- Capçalera: títol a l'esquerra, controls agrupats a la dreta. Alçada
+       fixa i sense vora: el que la separa del canvas és el fons blanc. -->
+  <header class="app-header">
+    <h1 class="app-header__title">Editor P&amp;ID</h1>
+
+    <div class="app-header__actions">
+      <div class="btn-group">
+        <button id="undo-btn" type="button" class="btn btn--icon" title="Desfer (Ctrl+Z)" aria-label="Desfer" disabled>
+          <svg class="icon" aria-hidden="true"><use href="#i-undo" /></svg>
+        </button>
+        <button id="redo-btn" type="button" class="btn btn--icon" title="Refer (Ctrl+Y)" aria-label="Refer" disabled>
+          <svg class="icon" aria-hidden="true"><use href="#i-redo" /></svg>
+        </button>
       </div>
-    </div>
-    <div class="tool-groups">
-      <div class="tool-group">
-        <span class="tool-group__label">Elements</span>
-        <div class="tools">
-          <button data-tool="pump">Bomba</button>
-          <button data-tool="sieve">Cernedor</button>
-          <button data-tool="bagdump">Descàrrega de sacs</button>
-          <button data-tool="screwfeeder">Dosificador sensefí</button>
-          <button data-tool="airlock">Esclusa rotativa</button>
-          <button data-tool="valve">Vàlvula</button>
-        </div>
-      </div>
-      <div class="tool-group">
-        <span class="tool-group__label">Transport pneumàtic</span>
-        <div class="tools">
-          <button data-tool="cyclone">Cicló</button>
-          <button data-tool="diverter">Desviadora</button>
-          <button data-tool="filter">Filtre transport</button>
-          <button data-tool="injector">Injector</button>
-        </div>
-      </div>
-      <div class="tool-group">
-        <span class="tool-group__label">Emmagatzematge</span>
-        <div class="tools">
-          <button data-tool="silo">Silo</button>
-          <button data-tool="gravityhopper">Tolva de gravetat</button>
-          <button data-tool="hopper">Tolva filtre</button>
-          <button data-tool="trouserhopper">Tolva pantaló</button>
-        </div>
-      </div>
+
+      <span class="divider" aria-hidden="true"></span>
+
+      <button id="clear-all" type="button" class="btn" title="Buida el canvas">
+        <svg class="icon" aria-hidden="true"><use href="#i-trash" /></svg>
+        Neteja tot
+      </button>
+
+      <button id="save-model" type="button" class="btn btn--primary"
+              title="Desa el model en un arxiu .pid.json (Ctrl+S). Per obrir-lo, arrossega'l sobre el canvas.">
+        <svg class="icon" aria-hidden="true"><use href="#i-save" /></svg>
+        Desa
+      </button>
     </div>
   </header>
 
+  <!-- Barra d'eines: una sola línia. Les categories obren el seu menú en
+       comptes de tenir tots els elements sempre a la vista, que és el que
+       abans ocupava tres files. Els botons [data-tool] continuen vivint
+       dins de .tool-groups encara que el menú estigui amagat, de manera que
+       ni la delegació de clics ni typeLabel() de script.js han de saber res
+       d'aquest canvi. -->
+  <nav class="app-toolbar" aria-label="Elements del diagrama">
+    <div class="tool-groups">
+      <div class="tool-group">
+        <button class="tool-group__trigger" type="button" aria-expanded="false" aria-controls="tools-elements">
+          Elements
+          <svg class="icon icon--chevron" aria-hidden="true"><use href="#i-chevron" /></svg>
+        </button>
+        <div class="tool-group__menu" id="tools-elements" hidden>
+          <div class="tools">
+            <button data-tool="pump">Bomba</button>
+            <button data-tool="sieve">Cernedor</button>
+            <button data-tool="bagdump">Descàrrega de sacs</button>
+            <button data-tool="screwfeeder">Dosificador sensefí</button>
+            <button data-tool="airlock">Esclusa rotativa</button>
+            <button data-tool="valve">Vàlvula</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tool-group">
+        <button class="tool-group__trigger" type="button" aria-expanded="false" aria-controls="tools-transport">
+          Transport pneumàtic
+          <svg class="icon icon--chevron" aria-hidden="true"><use href="#i-chevron" /></svg>
+        </button>
+        <div class="tool-group__menu" id="tools-transport" hidden>
+          <div class="tools">
+            <button data-tool="cyclone">Cicló</button>
+            <button data-tool="diverter">Desviadora</button>
+            <button data-tool="filter">Filtre transport</button>
+            <button data-tool="injector">Injector</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tool-group">
+        <button class="tool-group__trigger" type="button" aria-expanded="false" aria-controls="tools-storage">
+          Emmagatzematge
+          <svg class="icon icon--chevron" aria-hidden="true"><use href="#i-chevron" /></svg>
+        </button>
+        <div class="tool-group__menu" id="tools-storage" hidden>
+          <div class="tools">
+            <button data-tool="silo">Silo</button>
+            <button data-tool="gravityhopper">Tolva de gravetat</button>
+            <button data-tool="hopper">Tolva filtre</button>
+            <button data-tool="trouserhopper">Tolva pantaló</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="app-toolbar__end">
+      <!-- El motor de càlcul ja existeix (simulation.js), però la pantalla
+           per fer-lo servir encara no. El botó hi és, amb el seu lloc
+           reservat i ben visible, i desactivat fins que la tingui. -->
+      <button id="time-calc" type="button" class="btn btn--feature"
+              title="Disponible properament" aria-label="Càlcul de temps (disponible properament)" disabled>
+        <svg class="icon" aria-hidden="true"><use href="#i-clock" /></svg>
+        Càlcul de temps
+      </button>
+
+      <button id="lines-toggle" type="button" class="btn btn--outline"
+              aria-expanded="false" aria-controls="lines-panel">
+        <svg class="icon" aria-hidden="true"><use href="#i-routes" /></svg>
+        Línies de transport
+      </button>
+    </div>
+  </nav>
+
   <main id="canvas-container">
     <svg id="canvas" width="100%" height="100%"></svg>
+
+    <!-- Navegació del canvas: separada de la barra d'eines perquè és
+         d'una altra mena de cosa (mirar el diagrama, no editar-lo). -->
+    <div class="canvas-controls" role="group" aria-label="Navegació del canvas">
+      <button id="zoom-in" type="button" class="btn" title="Apropa" aria-label="Apropa">
+        <svg class="icon" aria-hidden="true"><use href="#i-plus" /></svg>
+      </button>
+      <button id="zoom-out" type="button" class="btn" title="Allunya" aria-label="Allunya">
+        <svg class="icon" aria-hidden="true"><use href="#i-minus" /></svg>
+      </button>
+      <button id="zoom-fit" type="button" class="btn" title="Enquadra-ho tot" aria-label="Enquadra-ho tot">
+        <svg class="icon" aria-hidden="true"><use href="#i-fit" /></svg>
+      </button>
+    </div>
+
+    <!-- Resultat de desar/obrir: s'anuncia sol als lectors de pantalla. Va
+         aquí i no a la capçalera perquè la capçalera es mantingui neta. -->
+    <p id="file-note" class="file-note" role="status" aria-live="polite" hidden></p>
   </main>
 
   <!-- Panell de línies de transport: sobreposat al canvas (mateix patró que
@@ -74,10 +189,13 @@
     <div class="lines-panel__head">
       <h2 id="lines-panel-title" class="lines-panel__title">Línies de transport</h2>
       <button id="lines-close" type="button" class="lines-panel__close" title="Tanca" aria-label="Tanca el panell">
-        <span aria-hidden="true">×</span>
+        <svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
       </button>
     </div>
-    <button id="lines-recalc" type="button" class="lines-panel__recalc">Recalcular</button>
+    <button id="lines-recalc" type="button" class="lines-panel__recalc">
+      <svg class="icon" aria-hidden="true"><use href="#i-refresh" /></svg>
+      Recalcular
+    </button>
     <!-- El resultat del recàlcul s'anuncia sol als lectors de pantalla. -->
     <p id="lines-note" class="lines-panel__note" role="status" aria-live="polite" hidden></p>
     <ul id="lines-list" class="lines-panel__list"></ul>
@@ -99,7 +217,7 @@
     <div class="lines-panel__head">
       <h2 id="process-panel-title" class="lines-panel__title">Configuració</h2>
       <button id="process-close" type="button" class="lines-panel__close" title="Tanca" aria-label="Tanca el panell">
-        <span aria-hidden="true">×</span>
+        <svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
       </button>
     </div>
     <p id="process-subject" class="process-panel__subject"></p>
