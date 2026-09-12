@@ -262,7 +262,8 @@
     <div id="sim-issues" class="sim-issues" role="status" aria-live="polite" hidden></div>
 
     <!-- Cronograma: un bloc per acció, proporcional a la seva durada, amb
-         el cursor arrossegable per sobre. -->
+         el cursor arrossegable per sobre. Els blocs es poden moure,
+         allargar, seleccionar i copiar: vegeu docs/SIMULATION.md. -->
     <div id="sim-track" class="sim-timeline" role="slider" tabindex="0"
          aria-label="Cursor de temps" aria-valuemin="0" aria-valuenow="0" aria-valuemax="0">
       <div class="sim-timeline__head">
@@ -272,6 +273,16 @@
       <!-- Una fila per bomba, totes compartint el mateix eix de temps. -->
       <div id="sim-lanes" class="sim-timeline__lanes"></div>
       <div id="sim-cursor" class="sim-timeline__cursor"></div>
+    </div>
+
+    <!-- Què vol dir cada marcatge. Va fora del cronograma perquè clicar-hi
+         no mogui el cursor de temps. -->
+    <div class="sim-legend">
+      <span class="sim-legend__item"><i class="sim-legend__swatch sim-legend__swatch--work"></i>Treball</span>
+      <span class="sim-legend__item"><i class="sim-legend__swatch sim-legend__swatch--idle"></i>No mou producte</span>
+      <span class="sim-legend__item"><i class="sim-legend__swatch sim-legend__swatch--clash"></i>Xoca amb una altra acció</span>
+      <span class="sim-legend__item"><i class="sim-legend__swatch sim-legend__swatch--dry"></i>Es queda sense producte</span>
+      <span class="sim-legend__hint">Arrossega per moure · estira les vores per allargar · Ctrl per triar-ne més d'una · Alt mentre mous = ajust fi</span>
     </div>
 
     <div class="sim-columns">
@@ -284,7 +295,7 @@
         <div class="sim-table-wrap">
           <table class="sim-table">
             <thead>
-              <tr><th>#</th><th>Bomba</th><th>Acció</th><th>Línia</th><th>Inici</th><th>Durada</th><th>Estimació</th><th></th></tr>
+              <tr><th>#</th><th>Bomba</th><th>Acció</th><th>Línia</th><th>Comença al</th><th title="Quant dura l'acció, no el minut en què acaba">Dura</th><th>Estimació</th><th></th></tr>
             </thead>
             <tbody id="sim-rows"></tbody>
           </table>
@@ -319,6 +330,11 @@
          la finestra està desancorada. -->
     <div id="sim-grip" class="sim-grip" aria-hidden="true"></div>
   </section>
+
+  <!-- Números en directe mentre s'arrossega un bloc del cronograma, i
+       explicació del problema en passar-hi el ratolí per sobre. Penja del
+       body perquè redibuixar el cronograma no se l'endugui. -->
+  <div id="sim-block-tip" class="sim-block-tip" role="status" aria-live="off" hidden></div>
 
   <!-- Panell de línies de transport: sobreposat al canvas (mateix patró que
        el menú contextual i els marcs de selecció, que també són HTML fix per

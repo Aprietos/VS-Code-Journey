@@ -79,7 +79,12 @@ const ProcessModel = (() => {
   // Una seqüència és una llista ORDENADA d'accions que s'executen una
   // darrere l'altra, sense solapaments: només n'hi ha una d'activa alhora.
   //
-  // Cada acció és { order, type, pumpId, lineId, startTime, duration }:
+  // Cada acció és { id, order, type, pumpId, lineId, startTime, duration }:
+  //   · `id`        identificador estable, únic i que no canvia mai mentre
+  //                 l'acció existeixi. L'`order` es renumera cada cop que
+  //                 es reordena la seqüència i per això no serveix per
+  //                 recordar què hi ha seleccionat o què s'està
+  //                 arrossegant al cronograma; l'`id`, sí.
   //   · `order`     posició dins la llista, 1, 2, 3... Es renumera sola.
   //   · `type`      un dels ACTION_TYPES.
   //   · `pumpId`    la bomba que la fa. Una bomba no pot fer dues coses
@@ -115,6 +120,10 @@ const ProcessModel = (() => {
   // queda buida, que és el que toca.
   let sequence = [];
 
+  // Comptador dels identificadors que es generen aquí. No surt mai del
+  // mòdul: qui necessiti referir-se a una acció fa servir el seu `id`.
+  let actionSerial = 0;
+
   function createAction(values) {
     const source = values || {};
     // Un arxiu d'abans del cronograma en paral·lel no porta instant
@@ -124,6 +133,7 @@ const ProcessModel = (() => {
       && Number.isFinite(Number(source.startTime));
 
     return {
+      id: typeof source.id === 'string' ? source.id : '',
       order: Number(source.order) || 0,
       type: source.type || ACTION_TYPES.TRANSPORT,
       pumpId: source.pumpId || '',
@@ -138,7 +148,7 @@ const ProcessModel = (() => {
   // la seva posició al cronograma. No valida res: de dir què està malament
   // se n'encarrega el motor, que és qui sap donar el missatge sencer.
   function normalizeSequence(actions) {
-    return (Array.isArray(actions) ? actions : [])
+    const list = (Array.isArray(actions) ? actions : [])
       .map((action, index) => ({ action: createAction(action), index }))
       .sort((a, b) => (
         (a.action.startTime || 0) - (b.action.startTime || 0)
@@ -149,6 +159,26 @@ const ProcessModel = (() => {
         entry.action.order = index + 1;
         return entry.action;
       });
+
+    // Identificadors: es respecta el que ja porti cada acció (un arxiu
+    // desat, una acció que només s'ha mogut) i se'n dona un de nou a les
+    // que no en tenen o en repeteixen un. Es fa en dues passades perquè el
+    // que es genera no pugui xocar amb cap dels que ja hi són.
+    const used = new Set();
+    list.forEach((action) => {
+      if (action.id && !used.has(action.id)) used.add(action.id);
+      else action.id = '';
+    });
+    list.forEach((action) => {
+      if (action.id) return;
+      do {
+        actionSerial += 1;
+        action.id = `a${actionSerial}`;
+      } while (used.has(action.id));
+      used.add(action.id);
+    });
+
+    return list;
   }
 
   // ---- Magatzem ----

@@ -3631,6 +3631,40 @@ let simValueNodes = { storages: {}, consumptions: {} };
 // buildSimulationScenario).
 let simLineRoutes = {};
 
+// ---- Edició directa sobre el cronograma ----
+// Les accions seleccionades es recorden pel seu IDENTIFICADOR, no per
+// l'ordre: l'ordre es renumera cada cop que una acció canvia d'hora, i amb
+// ell la selecció ballaria sola.
+let simSelection = new Set();
+
+// Accions copiades. Són còpies planes: en enganxar-les se'ls dona un
+// identificador nou, que és el que després permet deixar-les triades.
+let simActionClipboard = [];
+let simPasteSerial = 0;
+
+// Arrossegament en curs, o null. Guarda la seqüència TAL COM ERA en
+// començar: cada moviment del ratolí es calcula sempre a partir d'aquí i
+// mai del resultat del moviment anterior, de manera que el que es veu
+// només depèn d'on és el ratolí ara i tornar al punt de partida ho deixa
+// tot exactament com estava.
+let simDrag = null;
+let simDragFrame = 0;
+
+// Mentre s'arrossega, l'eix de temps es congela. Si es tornés a ajustar a
+// cada moviment, estirar l'última acció cap a la dreta faria créixer l'eix,
+// que faria que el mateix píxel volgués dir un instant diferent, que la
+// faria créixer una mica més... i el bloc fugiria del dit. Congelat amb una
+// mica de marge a la dreta, el que hi ha sota el ratolí s'hi queda.
+let simFreezeScale = 0;
+
+// Durada mínima d'una acció, en segons. El motor rebutja les de durada
+// zero, i una bombolla d'un sol segon no es podria ni agafar.
+const SIM_MIN_DURATION = 5;
+
+// Graelles de temps candidates, en segons. Es tria la més fina que encara
+// es distingeixi a la pantalla.
+const SIM_SNAP_STEPS = [5, 10, 15, 30, 60, 120, 300, 600, 900, 1800];
+
 // ---- Format ----
 function formatClock(seconds) {
   const total = Math.max(0, Math.round(Number(seconds) || 0));
@@ -3793,9 +3827,93 @@ function simLanes() {
 // conflictes) el motor no en dona cap, però el cronograma s'ha de poder
 // dibuixar igualment: és justament on s'han de veure marcats els xocs.
 function simTimelineDuration() {
-  if (simCompiled && simCompiled.ok) return simCompiled.totalDuration;
-  return (simScenario ? simScenario.actions : [])
-    .reduce((max, action) => Math.max(max, (action.startTime || 0) + action.duration), 0);
+  const natural = (simCompiled && simCompiled.ok)
+    ? simCompiled.totalDuration
+    : (simScenario ? simScenario.actions : [])
+      .reduce((max, action) => Math.max(max, (action.startTime || 0) + action.duration), 0);
+
+  // Mentre s'arrossega, l'eix no s'encongeix mai per sota del que tenia en
+  // començar (vegeu simFreezeScale).
+  return simFreezeScale ? Math.max(simFreezeScale, natural) : natural;
+}
+
+// Problemes de cada acció, per identificador. TOT surt del resultat del
+// motor: aquí no es decideix res, només es tria com pintar-ho.
+//
+//   · `clash` són els xocs (mateixa bomba o canonada compartida). Bloquegen
+//     la reproducció i el motor ja en dona el missatge sencer.
+//   · `dry` és la falta de producte. NO bloqueja: és una situació física
+//     real que el motor sap tractar, i per això es marca d'una altra manera.
+let simMarksCache = { key: null, value: null };
+
+function simActionMarks() {
+  // Només canvien quan el motor torna a calcular, i el ratolí passant per
+  // sobre dels blocs les demana molt sovint.
+  if (simMarksCache.key === simCompiled && simMarksCache.value) return simMarksCache.value;
+
+  const marks = new Map();
+  if (!simScenario) return marks;
+
+  const byOrder = new Map(simScenario.actions.map((action) => [action.order, action]));
+  const entryFor = (id) => {
+    if (!marks.has(id)) marks.set(id, { clash: [], shared: new Set(), against: new Set(), dry: null });
+    return marks.get(id);
+  };
+
+  (simCompiled ? simCompiled.errors : []).forEach((issue) => {
+    if (issue.code !== 'pump-conflict' && issue.code !== 'pipe-conflict') return;
+
+    [[issue.actionOrder, issue.otherOrder], [issue.otherOrder, issue.actionOrder]]
+      .forEach(([own, other]) => {
+        const action = byOrder.get(own);
+        if (!action) return;
+        const entry = entryFor(action.id);
+        if (!entry.clash.includes(issue.message)) entry.clash.push(issue.message);
+        (issue.sharedElementIds || []).forEach((elementId) => entry.shared.add(elementId));
+        if (byOrder.has(other)) entry.against.add(byOrder.get(other).id);
+      });
+  });
+
+  if (simCompiled && simCompiled.ok) {
+    simCompiled.actions.forEach((result) => {
+      if (result.complete || result.incompleteReason !== 'storage-empty') return;
+
+      const action = byOrder.get(result.order);
+      const line = action && simScenario.lines[result.lineId];
+      if (!line) return;
+
+      // Instant en què deixa de moure producte: el final de l'últim tram en
+      // què la seva línia encara movia alguna cosa. Si no n'hi ha cap, és
+      // que no ha arribat ni a començar.
+      let dryAt = result.startTime;
+      simCompiled.segments.forEach((segment) => {
+        if (segment.startTime >= result.endTime || segment.endTime <= result.startTime) return;
+        if (!segment.movingLineIds.includes(result.lineId)) return;
+        dryAt = Math.max(dryAt, Math.min(segment.endTime, result.endTime));
+      });
+
+      const storage = simScenario.storages[line.storageId];
+      const state = SimulationEngine.stateAt(simCompiled, result.startTime);
+
+      entryFor(action.id).dry = {
+        at: dryAt,
+        // Part de l'acció que es queda sense res a moure, de 0 a 1.
+        ratio: result.duration > 0
+          ? Math.min(1, Math.max(0, (dryAt - result.startTime) / result.duration))
+          : 0,
+        // Quilos que demanaria l'acció sencera, amb la regla de sempre:
+        // multiplicar primer i dividir per 3600 al final.
+        needed: ((Number(line.throughput) || 0) * result.duration) / 3600,
+        moved: result.transferred,
+        available: state.storages[line.storageId] || 0,
+        storage: storage ? storage.name : '',
+        neverStarted: !(result.transferred > 0),
+      };
+    });
+  }
+
+  simMarksCache = { key: simCompiled, value: marks };
+  return marks;
 }
 
 // Accions que ara mateix xoquen amb alguna altra, per marcar-les.
@@ -3864,6 +3982,32 @@ function refreshSimulation() {
 
 function refreshSimulationIfOpen() {
   if (simPanel && !simPanel.hidden) refreshSimulation();
+}
+
+// Torna a calcular canviant NOMÉS la seqüència. Refer l'escenari sencer
+// (tornar a detectar línies, bombes i recorreguts) a cada moviment del
+// ratolí aniria a batzegades i no cal: mentre s'arrossega una bombolla del
+// cronograma, del diagrama no se'n mou res.
+//
+// No toca l'historial: qui hi desa un pas és commitSequence, en deixar
+// anar. Així un arrossegament sencer és UN sol "desfer".
+function resimulateSequence() {
+  if (!simScenario) {
+    refreshSimulation();
+    return;
+  }
+
+  simScenario.actions = ProcessModel.getSequence();
+  simCompiled = SimulationEngine.compile(simScenario);
+
+  if (!simCompiled.ok) pauseSimulation();
+  simTime = Math.min(simTime, simCompiled.totalDuration);
+
+  renderSimIssues();
+  renderSimSequence();
+  renderSimTimeline();
+  renderSimNow();
+  updateSimControls();
 }
 
 // ---- Reproducció ----
@@ -3999,6 +4143,11 @@ function simIconButton(iconId, label, disabled, onClick) {
   return button;
 }
 
+// Minuts amb dos decimals com a molt, per escriure'ls dins d'una frase.
+function simMinuteLabel(seconds) {
+  return `${Math.round((Number(seconds) || 0) / 60 * 100) / 100} min`;
+}
+
 // Camp numèric en minuts que desa en segons.
 function simMinutesField(seconds, onChange) {
   const wrap = document.createElement('div');
@@ -4039,9 +4188,12 @@ function renderSimSequence() {
     simLanes().filter((lane) => lane.id).map((lane) => ({ value: lane.id, label: lane.name })),
   );
 
+  const rowMarks = simActionMarks();
+
   actions.forEach((action, index) => {
     const row = document.createElement('tr');
     if (conflicts.has(action.order)) row.classList.add('is-conflict');
+    else if (rowMarks.get(action.id) && rowMarks.get(action.id).dry) row.classList.add('is-dry');
 
     const order = document.createElement('td');
     order.className = 'sim-row__order';
@@ -4109,7 +4261,7 @@ function renderSimSequence() {
     }));
 
     const durationCell = document.createElement('td');
-    durationCell.appendChild(simMinutesField(action.duration, (seconds) => {
+    const durationField = simMinutesField(action.duration, (seconds) => {
       const next = ProcessModel.getSequence();
       const delta = seconds - next[index].duration;
       const pumpId = next[index].pumpId || '';
@@ -4128,7 +4280,16 @@ function renderSimSequence() {
       });
 
       commitSequence(next);
-    }));
+    });
+
+    // Que no es pugui confondre la durada amb l'instant final: al costat hi
+    // va, en gris i sense poder-s'hi escriure, el minut en què acaba.
+    const ends = document.createElement('span');
+    ends.className = 'sim-row__ends';
+    ends.textContent = `→ acaba al ${simMinuteLabel((action.startTime || 0) + action.duration)}`;
+    ends.title = 'Minut en què acaba aquesta acció. La casella del costat és quant dura, no quan acaba.';
+    durationField.appendChild(ends);
+    durationCell.appendChild(durationField);
 
     // Estimació: el que diu el motor per a aquesta acció, no un càlcul fet
     // aquí. Si la línia té algun problema, hi va el motiu.
@@ -4173,7 +4334,9 @@ function renderSimSequence() {
         const parts = [storage && storage.product ? storage.product : 'sense producte', `${line.throughput} kg/h`];
         if (result) {
           parts.push(`${ProcessModel.formatKg(result.transferred)} kg`);
-          if (!result.complete) estimate.classList.add('sim-row__estimate--short');
+          // Falta de producte: color propi, el mateix que al cronograma, i
+          // diferent del vermell dels xocs, que sí que bloquegen.
+          if (!result.complete) estimate.classList.add('sim-row__estimate--dry');
         }
         estimate.textContent = parts.join(' · ');
         if (result && !result.complete) {
@@ -4208,6 +4371,10 @@ function renderSimTimeline() {
   simLanesHost.replaceChildren();
   simTicks.replaceChildren();
 
+  // Una acció esborrada no es pot quedar seleccionada.
+  const alive = new Set((simScenario ? simScenario.actions : []).map((action) => action.id));
+  [...simSelection].forEach((id) => { if (!alive.has(id)) simSelection.delete(id); });
+
   const total = simTimelineDuration();
   simTrack.setAttribute('aria-valuemax', String(Math.round(total)));
   if (!total) {
@@ -4216,7 +4383,7 @@ function renderSimTimeline() {
   }
 
   const actions = simScenario ? simScenario.actions : [];
-  const conflicts = simConflictingOrders();
+  const marks = simActionMarks();
   const computed = {};
   if (simCompiled && simCompiled.ok) {
     simCompiled.actions.forEach((action) => { computed[action.order] = action; });
@@ -4233,6 +4400,7 @@ function renderSimTimeline() {
 
     const row = document.createElement('div');
     row.className = 'sim-lane';
+    row.dataset.laneId = lane.id;
     if (lane.orphan) row.classList.add('sim-lane--orphan');
 
     const label = document.createElement('span');
@@ -4256,21 +4424,34 @@ function renderSimTimeline() {
 
     own.forEach((action) => {
       const result = computed[action.order];
+      const mark = marks.get(action.id) || { clash: [], dry: null };
+      const width = (action.duration / total) * 100;
+
       const block = document.createElement('div');
       block.className = 'sim-block';
+      block.dataset.actionId = action.id;
+      block.tabIndex = -1;
 
-      if (conflicts.has(action.order)) block.classList.add('sim-block--conflict');
+      if (mark.clash.length) block.classList.add('sim-block--conflict');
       else if (action.type === ProcessModel.ACTION_TYPES.SWEEP && action.lineId) {
         block.classList.add('sim-block--sweep');
       } else if (result && !result.moving) block.classList.add('sim-block--idle');
-      else if (result && !result.complete) block.classList.add('sim-block--short');
       else if (!result && !MOVES_PRODUCT_TYPES.has(action.type)) block.classList.add('sim-block--idle');
 
+      // Falta de producte: marcatge propi, diferent del dels xocs, i que no
+      // impedeix reproduir res.
+      if (mark.dry) {
+        block.classList.add('sim-block--dry');
+        if (mark.dry.neverStarted) block.classList.add('sim-block--dry-all');
+      }
+
+      if (simSelection.has(action.id)) block.classList.add('sim-block--selected');
+      if (simDrag && simDrag.ids.includes(action.id)) block.classList.add('sim-block--dragging');
+      if (width < 6) block.classList.add('sim-block--tiny');
+
       block.style.left = `${((action.startTime || 0) / total) * 100}%`;
-      block.style.width = `${(action.duration / total) * 100}%`;
-      block.title = `${actionLabel(action.type)}${action.lineId ? ` · ${simLineName(action.lineId)}` : ''}`
-        + ` · del minut ${Math.round(((action.startTime || 0) / 60) * 100) / 100}`
-        + ` al ${Math.round((((action.startTime || 0) + action.duration) / 60) * 100) / 100}`;
+      block.style.width = `${width}%`;
+      block.title = simBlockSummary(action);
 
       const what = document.createElement('span');
       what.className = 'sim-block__name';
@@ -4281,6 +4462,24 @@ function renderSimTimeline() {
       which.textContent = action.lineId ? simLineName(action.lineId) : '—';
 
       block.append(what, which);
+
+      // El tros que es quedaria sense producte, ratllat a part: així es veu
+      // EN QUIN MOMENT s'acaba, no només que s'acaba.
+      if (mark.dry) {
+        const dry = document.createElement('span');
+        dry.className = 'sim-block__dry';
+        dry.style.left = `${mark.dry.ratio * 100}%`;
+        block.appendChild(dry);
+      }
+
+      // Vores per allargar i escurçar.
+      ['start', 'end'].forEach((side) => {
+        const grip = document.createElement('span');
+        grip.className = `sim-block__grip sim-block__grip--${side}`;
+        grip.dataset.grip = side;
+        block.appendChild(grip);
+      });
+
       track.appendChild(block);
     });
 
@@ -4310,6 +4509,578 @@ function renderSimTimeline() {
 // Els tipus que mouen producte, per poder pintar els blocs abans que el
 // motor hagi compilat res.
 const MOVES_PRODUCT_TYPES = new Set([ProcessModel.ACTION_TYPES.TRANSPORT]);
+
+// =====================================================================
+// El cronograma com a eina d'edició
+// =====================================================================
+// Les bombolles es poden moure, allargar, canviar de fila, triar, copiar i
+// esborrar. Tot plegat acaba SEMPRE al mateix lloc que la taula:
+// ProcessModel.setSequence(). El cronograma no calcula res pel seu compte,
+// i per això els quilos surten idèntics s'editi per on s'editi.
+
+const simBlockTip = document.getElementById('sim-block-tip');
+
+function simPumpLabel(pumpId) {
+  const pump = pumpId && simScenario && simScenario.pumps[pumpId];
+  return pump ? pump.name : 'Sense bomba';
+}
+
+// Si una bomba pot fer-se càrrec d'una acció. La fila "sense bomba" ho
+// accepta tot (és justament on van a parar les que encara no en tenen), i
+// les accions que no depenen de cap línia tampoc no hi posen condicions.
+function simPumpCanDrive(pumpId, action) {
+  if (!pumpId) return true;
+  if (!action.lineId) return true;
+  const line = simScenario && simScenario.lines[action.lineId];
+  if (!line) return true;
+  return (line.pumpIds || []).includes(pumpId);
+}
+
+function simBlockSummary(action) {
+  const end = (action.startTime || 0) + action.duration;
+  return `${actionLabel(action.type)}${action.lineId ? ` · ${simLineName(action.lineId)}` : ''}`
+    + ` · del ${simMinuteLabel(action.startTime || 0)} al ${simMinuteLabel(end)}`;
+}
+
+function simActionById(id) {
+  return (simScenario ? simScenario.actions : []).find((action) => action.id === id) || null;
+}
+
+// ---- Geometria ----
+// Es mesura la pista de debò en comptes de refer el compte a partir dels
+// marges: si algun dia canvia el disseny del panell, això continua quadrant.
+function simTrackGeometry() {
+  const lane = simLanesHost.querySelector('.sim-lane__track');
+  if (lane) {
+    const box = lane.getBoundingClientRect();
+    if (box.width > 0) return { left: box.left, width: box.width };
+  }
+  const rect = simTrack.getBoundingClientRect();
+  const left = rect.left + 16 + SIM_LANE_LABEL + 8;
+  return { left, width: Math.max(1, rect.right - 16 - left) };
+}
+
+function simSecondsPerPixel() {
+  const total = simTimelineDuration();
+  return total > 0 ? total / simTrackGeometry().width : 0;
+}
+
+// Fila del cronograma que hi ha sota el ratolí, o null si no n'hi ha cap.
+function simLaneFromPointer(clientY) {
+  const row = [...simLanesHost.children].find((node) => {
+    const box = node.getBoundingClientRect();
+    return clientY >= box.top && clientY <= box.bottom;
+  });
+  return row ? row.dataset.laneId : null;
+}
+
+// ---- Graella de temps ----
+// Es tria la graella més fina que encara es distingeixi a la pantalla (uns
+// 8 px per pas): així els números surten rodons sense que la graella es
+// torni inútil quan la seqüència és llarga. Amb Alt premut no s'ajusta res.
+function simSnapStep() {
+  const perPixel = simSecondsPerPixel();
+  if (!perPixel) return 30;
+  const minimum = perPixel * 8;
+  return SIM_SNAP_STEPS.find((step) => step >= minimum)
+    || SIM_SNAP_STEPS[SIM_SNAP_STEPS.length - 1];
+}
+
+// Vores de les altres accions. Encadenar-ne dues és el que més es fa, i
+// així n'hi ha prou d'acostar-les perquè encaixin.
+function simMagnetEdges(exceptIds) {
+  const skip = new Set(exceptIds || []);
+  const edges = [0];
+  (simScenario ? simScenario.actions : []).forEach((action) => {
+    if (skip.has(action.id)) return;
+    edges.push(action.startTime || 0, (action.startTime || 0) + action.duration);
+  });
+  return edges;
+}
+
+function simSnapTime(seconds, fine, edges) {
+  if (fine) return Math.max(0, Math.round(seconds));
+
+  const tolerance = simSecondsPerPixel() * 7;
+  let magnet = null;
+  (edges || []).forEach((edge) => {
+    const gap = Math.abs(edge - seconds);
+    if (gap <= tolerance && (magnet === null || gap < Math.abs(magnet - seconds))) magnet = edge;
+  });
+  if (magnet !== null) return Math.max(0, magnet);
+
+  const step = simSnapStep();
+  return Math.max(0, Math.round(seconds / step) * step);
+}
+
+// ---- Col·locació ----
+// Posa les accions arrossegades on diu `placements` i aparta les altres de
+// la mateixa bomba empenyent-les cap endavant, perquè dins d'una fila dues
+// accions no s'hi poden solapar mai.
+//
+// S'empeny i no s'intercanvia perquè empènyer conserva l'ordre en què
+// l'usuari havia pensat les coses; i només cap endavant, perquè fer-les
+// recular ompliria forats que hi són a posta (esperes entre tandes).
+// Com que sempre es parteix de `origin`, apartar una acció es desfà sol en
+// tornar enrere.
+function simLayoutSequence(origin, placements) {
+  const next = origin.map((action) => ({ ...action }));
+  const moved = new Map();
+
+  next.forEach((action) => {
+    const move = placements.get(action.id);
+    if (!move) return;
+    if (move.startTime !== undefined) action.startTime = Math.max(0, move.startTime);
+    if (move.duration !== undefined) action.duration = Math.max(SIM_MIN_DURATION, move.duration);
+    if (move.pumpId !== undefined) action.pumpId = move.pumpId;
+    moved.set(action.id, action);
+  });
+
+  const lanes = new Set([...moved.values()].map((action) => action.pumpId || ''));
+
+  lanes.forEach((laneId) => {
+    const inLane = (action) => (action.pumpId || '') === laneId;
+    const fixed = next.filter((action) => inLane(action) && moved.has(action.id));
+    const rest = next.filter((action) => inLane(action) && !moved.has(action.id))
+      .sort((a, b) => a.startTime - b.startTime);
+
+    let cursor = 0;
+    rest.forEach((action) => {
+      let start = Math.max(action.startTime || 0, cursor);
+
+      // Empeny fins que no trepitgi cap de les arrossegades. El bucle acaba
+      // sempre: cada volta el desplaça cap endavant i n'hi ha un nombre fi.
+      let pushed = true;
+      while (pushed) {
+        pushed = false;
+        fixed.forEach((other) => {
+          const end = other.startTime + other.duration;
+          if (start < end && other.startTime < start + action.duration) {
+            start = end;
+            pushed = true;
+          }
+        });
+      }
+
+      action.startTime = start;
+      cursor = start + action.duration;
+    });
+  });
+
+  return next;
+}
+
+// Primer instant lliure d'una fila a partir de `from`. Serveix per
+// enganxar i per duplicar sense trepitjar res del que ja hi ha.
+function simFirstFreeSlot(actions, laneId, from, duration, ignore) {
+  const skip = ignore || new Set();
+  const busy = actions
+    .filter((action) => (action.pumpId || '') === laneId && !skip.has(action.id))
+    .map((action) => ({ start: action.startTime || 0, end: (action.startTime || 0) + action.duration }));
+
+  let start = Math.max(0, from);
+  let pushed = true;
+  while (pushed) {
+    pushed = false;
+    busy.forEach((slot) => {
+      if (start < slot.end && slot.start < start + duration) {
+        start = slot.end;
+        pushed = true;
+      }
+    });
+  }
+  return start;
+}
+
+// ---- Etiqueta flotant ----
+function showSimBlockTip(clientX, clientY, parts) {
+  simBlockTip.replaceChildren();
+
+  if (parts.head) {
+    const head = document.createElement('p');
+    head.className = 'sim-block-tip__head';
+    head.textContent = parts.head;
+    simBlockTip.appendChild(head);
+  }
+  if (parts.numbers) {
+    const numbers = document.createElement('p');
+    numbers.className = 'sim-block-tip__numbers';
+    numbers.textContent = parts.numbers;
+    simBlockTip.appendChild(numbers);
+  }
+  (parts.problems || []).forEach((problem) => {
+    const node = document.createElement('p');
+    node.className = `sim-block-tip__problem sim-block-tip__problem--${problem.kind}`;
+    node.textContent = problem.text;
+    simBlockTip.appendChild(node);
+  });
+
+  // Es col·loca a dalt a l'esquerra abans de mesurar-la: sense una posició
+  // de debò, el text s'ajusta d'una altra manera i l'alçada que se'n mesura
+  // no és la que tindrà.
+  simBlockTip.style.left = '0px';
+  simBlockTip.style.top = '0px';
+  simBlockTip.hidden = false;
+
+  // Sota el ratolí i a la dreta, i només per sobre si a baix no hi cap.
+  const box = simBlockTip.getBoundingClientRect();
+  const left = Math.min(Math.max(8, clientX + 14), window.innerWidth - box.width - 8);
+  const below = clientY + 18;
+  const top = below + box.height > window.innerHeight - 8
+    ? Math.max(8, clientY - box.height - 14)
+    : below;
+  simBlockTip.style.left = `${left}px`;
+  simBlockTip.style.top = `${top}px`;
+}
+
+function hideSimBlockTip() {
+  simBlockTip.hidden = true;
+}
+
+// ---- Tram compartit ressaltat sobre el diagrama ----
+// Només mentre el ratolí és sobre un bloc que xoca. És pintura temporal,
+// com la resta de la capa visual: es desfà tota sola.
+function simClearClashRoute() {
+  viewport.querySelectorAll('.pipe-path--clash').forEach((node) => node.classList.remove('pipe-path--clash'));
+  viewport.querySelectorAll('.pid-element--clash').forEach((node) => node.classList.remove('pid-element--clash'));
+}
+
+function simShowClashRoute(mark, action) {
+  simClearClashRoute();
+  if (!mark || !mark.shared || !mark.shared.size) return;
+
+  mark.shared.forEach((elementId) => {
+    const node = viewport.querySelector(`.pid-element[data-id="${elementId}"]`);
+    if (node) node.classList.add('pid-element--clash');
+  });
+
+  // Les canonades compartides són les que tenen les dues línies en comú.
+  const own = simScenario && simScenario.lines[action.lineId];
+  if (!own || !own.route) return;
+
+  const mine = new Set(own.route.connectors);
+  const shared = new Set();
+  mark.against.forEach((otherId) => {
+    const other = simActionById(otherId);
+    const line = other && simScenario.lines[other.lineId];
+    if (!line || !line.route) return;
+    line.route.connectors.forEach((key) => { if (mine.has(key)) shared.add(key); });
+  });
+
+  pipes.forEach((pipe) => {
+    if (shared.has(pipeKey(pipe))) pipe.path.classList.add('pipe-path--clash');
+  });
+}
+
+// Explicació d'un bloc en llenguatge planer: què és, quan va i què hi ha
+// de mal. Els missatges dels xocs els escriu el motor.
+function simBlockTipParts(action, mark) {
+  const end = (action.startTime || 0) + action.duration;
+  const parts = {
+    head: `${action.order}. ${actionLabel(action.type)} · ${simPumpLabel(action.pumpId)}`,
+    numbers: `Comença al ${simMinuteLabel(action.startTime || 0)}`
+      + ` · dura ${simMinuteLabel(action.duration)}`
+      + ` · acaba al ${simMinuteLabel(end)}`
+      + (action.lineId ? ` · ${simLineName(action.lineId)}` : ''),
+    problems: [],
+  };
+
+  (mark && mark.clash ? mark.clash : []).forEach((message) => {
+    parts.problems.push({ kind: 'clash', text: message });
+  });
+
+  if (mark && mark.dry) {
+    const dry = mark.dry;
+    parts.problems.push({
+      kind: 'dry',
+      text: dry.neverStarted
+        ? `No pot ni començar: al ${simMinuteLabel(dry.at)} «${dry.storage}» ja és buit.`
+          + ` Aquesta acció demanaria ${ProcessModel.formatKg(dry.needed)} kg i no n'hi queda cap.`
+        : `Es queda a mitges: «${dry.storage}» es buida al ${simMinuteLabel(dry.at)}.`
+          + ` Calien ${ProcessModel.formatKg(dry.needed)} kg, n'hi havia`
+          + ` ${ProcessModel.formatKg(dry.available)} kg i en mourà`
+          + ` ${ProcessModel.formatKg(dry.moved)} kg.`,
+    });
+  }
+
+  return parts;
+}
+
+// ---- Arrossegar ----
+function simBeginDrag(event, block, mode) {
+  const id = block.dataset.actionId;
+  const action = simActionById(id);
+  if (!action) return;
+
+  const origin = ProcessModel.getSequence().map((entry) => ({ ...entry }));
+
+  // Arrossegar el cos d'un bloc que forma part de la selecció mou tot el
+  // que hi ha triat; per les vores només es canvia la durada del que
+  // s'agafa, que és el que s'espera.
+  const ids = mode === 'move' && simSelection.has(id) && simSelection.size > 1
+    ? origin.filter((entry) => simSelection.has(entry.id)).map((entry) => entry.id)
+    : [id];
+
+  // Marge a la dreta per poder moure i allargar més enllà del final d'ara.
+  // Es fixa AQUÍ i no canvia fins que s'acaba: així el mateix píxel vol dir
+  // sempre el mateix instant i la bombolla no s'avança al ratolí.
+  const natural = simTimelineDuration();
+  simFreezeScale = natural + Math.max(120, natural * 0.25);
+
+  simDrag = {
+    id,
+    ids,
+    mode,
+    origin,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    lastX: event.clientX,
+    lastY: event.clientY,
+    alt: event.altKey,
+    moved: false,
+    refused: '',
+  };
+
+  // La captura no és imprescindible: si el navegador no la dona,
+  // l'arrossegament continua funcionant igual mentre el ratolí no surti.
+  try { simLanesHost.setPointerCapture(event.pointerId); } catch { /* sense captura */ }
+  // Només es repinta quin bloc està triat. Redibuixar el cronograma sencer
+  // aquí faria que un clic per triar una acció fes saltar l'escala de temps
+  // un instant, que és molt lleig i no serveix de res.
+  simPaintSelection();
+  simUpdateDrag();
+}
+
+function simUpdateDrag() {
+  const drag = simDrag;
+  if (!drag) return;
+
+  const originById = new Map(drag.origin.map((action) => [action.id, action]));
+  const base = originById.get(drag.id);
+  if (!base) return;
+
+  // Mentre no s'ha mogut res, això és un clic per triar: no s'hi toca cap
+  // número. Si s'hi toqués, clicar una acció que comença al minut 2,283 la
+  // desplaçaria tota sola fins a la graella més propera.
+  if (!drag.moved) {
+    const still = simActionById(drag.id);
+    if (still) showSimBlockTip(drag.lastX, drag.lastY, simBlockTipParts(still, simActionMarks().get(drag.id)));
+    return;
+  }
+
+  const perPixel = simSecondsPerPixel();
+  const delta = (drag.lastX - drag.startX) * perPixel;
+  const edges = simMagnetEdges(drag.ids);
+  const placements = new Map();
+  drag.refused = '';
+
+  if (drag.mode === 'move') {
+    const snapped = simSnapTime(Math.max(0, base.startTime + delta), drag.alt, edges);
+    const shift = snapped - base.startTime;
+
+    // Canvi de bomba: només amb una acció sola, i només si aquella bomba
+    // pot fer funcionar la seva línia.
+    let pumpId;
+    const lane = simLaneFromPointer(drag.lastY);
+    if (drag.ids.length === 1 && lane !== null && lane !== (base.pumpId || '')) {
+      if (simPumpCanDrive(lane, base)) pumpId = lane;
+      else {
+        drag.refused = `«${simPumpLabel(lane)}» no pot fer funcionar ${simLineName(base.lineId)}:`
+          + ' no hi està connectada. L\'acció es queda on era.';
+      }
+    }
+
+    drag.ids.forEach((id) => {
+      const source = originById.get(id);
+      if (!source) return;
+      const move = { startTime: Math.max(0, (source.startTime || 0) + shift) };
+      if (pumpId !== undefined && id === drag.id) move.pumpId = pumpId;
+      placements.set(id, move);
+    });
+  } else if (drag.mode === 'resize-end') {
+    const wanted = Math.max(0, base.startTime + base.duration + delta);
+    const end = Math.max(base.startTime + SIM_MIN_DURATION, simSnapTime(wanted, drag.alt, edges));
+    placements.set(drag.id, { duration: end - base.startTime });
+  } else {
+    const end = base.startTime + base.duration;
+    const wanted = Math.max(0, base.startTime + delta);
+    const start = Math.min(simSnapTime(wanted, drag.alt, edges), end - SIM_MIN_DURATION);
+    placements.set(drag.id, { startTime: start, duration: end - start });
+  }
+
+  ProcessModel.setSequence(simLayoutSequence(drag.origin, placements));
+  resimulateSequence();
+
+  // Fila de sota el ratolí: verda si hi cap, vermella si no.
+  const lane = simLaneFromPointer(drag.lastY);
+  [...simLanesHost.children].forEach((row) => {
+    const here = row.dataset.laneId === lane;
+    row.classList.toggle('sim-lane--drop', here && !drag.refused);
+    row.classList.toggle('sim-lane--refuse', here && Boolean(drag.refused));
+  });
+
+  // Els números que s'estan creant, en directe.
+  const current = simActionById(drag.id);
+  if (current) {
+    const parts = simBlockTipParts(current, simActionMarks().get(drag.id));
+    if (drag.refused) parts.problems.unshift({ kind: 'clash', text: drag.refused });
+    showSimBlockTip(drag.lastX, drag.lastY, parts);
+  }
+}
+
+function simEndDrag(cancelled) {
+  const drag = simDrag;
+  simDrag = null;
+  simFreezeScale = 0;
+  hideSimBlockTip();
+
+  if (!drag) return;
+
+  try {
+    if (simLanesHost.hasPointerCapture(drag.pointerId)) {
+      simLanesHost.releasePointerCapture(drag.pointerId);
+    }
+  } catch { /* no n'hi havia */ }
+
+  if (cancelled) ProcessModel.setSequence(drag.origin);
+
+  // Un clic que no ha mogut res només tria: no ha de deixar cap pas a
+  // l'historial ni fer creure que s'ha canviat alguna cosa.
+  if (cancelled || !drag.moved) {
+    resimulateSequence();
+    return;
+  }
+
+  // Un arrossegament sencer és UN sol "desfer".
+  pushHistory();
+}
+
+// ---- Selecció, copiar i enganxar ----
+function simSetSelection(ids) {
+  simSelection = new Set(ids);
+  renderSimTimeline();
+  renderSimSequence();
+}
+
+// Marca quins blocs estan triats sense tornar a calcular ni moure res de
+// lloc: només afegeix i treu una classe.
+function simPaintSelection() {
+  simLanesHost.querySelectorAll('.sim-block').forEach((node) => {
+    node.classList.toggle('sim-block--selected', simSelection.has(node.dataset.actionId));
+  });
+}
+
+function simSelectedActions() {
+  return (simScenario ? simScenario.actions : [])
+    .filter((action) => simSelection.has(action.id));
+}
+
+function simCopySelection() {
+  const picked = simSelectedActions();
+  if (!picked.length) return false;
+
+  const base = picked[0].startTime || 0;
+  simActionClipboard = picked.map((action) => ({
+    type: action.type,
+    pumpId: action.pumpId || '',
+    lineId: action.lineId || '',
+    duration: action.duration,
+    offset: (action.startTime || 0) - base,
+  }));
+  return true;
+}
+
+// Enganxa el que hi ha al porta-retalls. Cada acció torna a la seva bomba;
+// si només n'hi ha una i el ratolí apunta a una fila concreta, hi va. Mai
+// es col·loca a sobre d'una altra: es busca el primer forat lliure.
+function simPasteActions(target) {
+  if (!simActionClipboard.length) return;
+
+  const next = ProcessModel.getSequence();
+  const single = simActionClipboard.length === 1;
+  const anchor = target && target.time !== undefined ? target.time : null;
+  const pasted = [];
+  const refused = [];
+
+  simActionClipboard.forEach((entry) => {
+    const laneId = single && target && target.laneId !== null && target.laneId !== undefined
+      ? target.laneId
+      : entry.pumpId;
+
+    const probe = { lineId: entry.lineId };
+    if (!simPumpCanDrive(laneId, probe)) {
+      refused.push(`${actionLabel(entry.type)} (${simLineName(entry.lineId)}) no es pot posar a `
+        + `«${simPumpLabel(laneId)}»: aquella bomba no pot fer funcionar aquesta línia.`);
+      return;
+    }
+
+    const from = anchor !== null
+      ? anchor + entry.offset
+      : next.filter((action) => (action.pumpId || '') === laneId)
+        .reduce((end, action) => Math.max(end, (action.startTime || 0) + action.duration), 0);
+
+    simPasteSerial += 1;
+    const action = {
+      // Identificador propi, que no pot xocar amb els que dona el model:
+      // així, un cop desada la seqüència, se sap exactament quines accions
+      // s'acaben d'enganxar.
+      id: `x${simPasteSerial}`,
+      type: entry.type,
+      pumpId: laneId,
+      lineId: entry.lineId,
+      duration: entry.duration,
+      startTime: simFirstFreeSlot(next, laneId, from, entry.duration, new Set()),
+    };
+
+    next.push(action);
+    pasted.push(action);
+  });
+
+  if (refused.length) window.alert(refused.join('\n'));
+  if (!pasted.length) return;
+
+  commitSequence(next);
+
+  // Queden triades les que s'acaben d'enganxar: així es poden tornar a
+  // moure de seguida.
+  simSetSelection(pasted.map((action) => action.id));
+}
+
+function simDuplicateSelection() {
+  if (!simCopySelection()) return;
+  const picked = simSelectedActions();
+  const last = picked.reduce((end, action) => Math.max(end, (action.startTime || 0) + action.duration), 0);
+  simPasteActions({ laneId: null, time: last });
+}
+
+function simDeleteSelection() {
+  if (!simSelection.size) return;
+  const next = ProcessModel.getSequence().filter((action) => !simSelection.has(action.id));
+  simSelection = new Set();
+  commitSequence(next);
+}
+
+// Afegeix una acció just on s'ha clicat: la bomba de la fila i l'instant de
+// sota el ratolí. És la manera curta de començar una tanda nova.
+function simAddActionAt(laneId, time) {
+  const next = ProcessModel.getSequence();
+  const lines = Object.keys(simScenario ? simScenario.lines : {})
+    .filter((id) => !laneId || (simScenario.lines[id].pumpIds || []).includes(laneId));
+  const usable = lines.find((id) => !simLineProblems(id).length) || lines[0] || '';
+  const duration = 300;
+
+  next.push({
+    type: ProcessModel.ACTION_TYPES.TRANSPORT,
+    pumpId: laneId || '',
+    lineId: usable,
+    duration,
+    startTime: simFirstFreeSlot(next, laneId || '', simSnapTime(time, false, simMagnetEdges([])), duration, new Set()),
+  });
+
+  commitSequence(next);
+}
+
 
 // ---- Acció actual i estat del sistema ----
 // L'estructura es construeix un sol cop (aquí) i el bucle només canvia els
@@ -4495,15 +5266,15 @@ function renderSimNow() {
 const SIM_LANE_LABEL = 132;
 
 function simTimeFromPointer(clientX) {
-  const rect = simTrack.getBoundingClientRect();
-  // Les pistes comencen després de les etiquetes i del seu espai.
-  const left = rect.left + 16 + SIM_LANE_LABEL + 8;
-  const width = Math.max(1, rect.right - 16 - left);
+  const { left, width } = simTrackGeometry();
   const ratio = Math.min(Math.max((clientX - left) / width, 0), 1);
   return ratio * simTimelineDuration();
 }
 
 simTrack.addEventListener('pointerdown', (event) => {
+  // Les bombolles s'editen; la pista buida del voltant mou el cursor.
+  if (event.target.closest('.sim-block')) return;
+  if (simSelection.size) simSetSelection([]);
   if (!simCompiled || !simCompiled.ok || !simCompiled.totalDuration) return;
   event.preventDefault();
   simTrack.setPointerCapture(event.pointerId);
@@ -4528,6 +5299,186 @@ simTrack.addEventListener('pointermove', (event) => {
     simResumeAfterScrub = false;
     updateSimControls();
   });
+});
+
+
+// ---- Ratolí sobre el cronograma ----
+// Tot passa per simLanesHost, que sobreviu al redibuixat: el punter es
+// captura aquí i no pas al bloc, que desapareix i es torna a crear a cada
+// moviment. Sense això, redibuixar enmig d'un arrossegament el trencaria.
+simLanesHost.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return;
+
+  const block = event.target.closest('.sim-block');
+  if (!block) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  simTrack.focus({ preventScroll: true });
+
+  const id = block.dataset.actionId;
+
+  // Control afegeix i treu de la selecció; un clic sol deixa només aquesta.
+  if (event.ctrlKey || event.metaKey) {
+    const next = new Set(simSelection);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    simSelection = next;
+  } else if (!simSelection.has(id)) {
+    simSelection = new Set([id]);
+  }
+  simPaintSelection();
+
+  // Quina vora s'ha agafat. La zona sensible és més ampla del que es veu
+  // perquè encertar-la sigui fàcil, però mai més d'un quart del bloc.
+  const box = block.getBoundingClientRect();
+  const edge = Math.min(9, Math.max(3, box.width / 4));
+  let mode = 'move';
+  if (event.target.dataset.grip === 'start' || event.clientX - box.left <= edge) mode = 'resize-start';
+  else if (event.target.dataset.grip === 'end' || box.right - event.clientX <= edge) mode = 'resize-end';
+
+  simBeginDrag(event, block, mode);
+});
+
+simLanesHost.addEventListener('pointermove', (event) => {
+  if (!simDrag) return;
+
+  simDrag.lastX = event.clientX;
+  simDrag.lastY = event.clientY;
+  simDrag.alt = event.altKey;
+  if (Math.abs(event.clientX - simDrag.startX) > 3 || Math.abs(event.clientY - simDrag.startY) > 3) {
+    simDrag.moved = true;
+  }
+
+  // Un repintat per imatge i no un per cada moviment del ratolí: el ratolí
+  // en dispara molts més dels que la pantalla pot ensenyar.
+  if (simDragFrame) return;
+  simDragFrame = requestAnimationFrame(() => {
+    simDragFrame = 0;
+    simUpdateDrag();
+  });
+});
+
+['pointerup', 'pointercancel'].forEach((type) => {
+  simLanesHost.addEventListener(type, (event) => {
+    if (!simDrag) return;
+    if (simDragFrame) {
+      cancelAnimationFrame(simDragFrame);
+      simDragFrame = 0;
+    }
+    simEndDrag(type === 'pointercancel');
+  });
+});
+
+// Explicació en passar el ratolí per sobre: què és, quan va i, si hi ha
+// algun problema, quin. Mentre s'arrossega mana l'etiqueta de
+// l'arrossegament.
+simLanesHost.addEventListener('mousemove', (event) => {
+  if (simDrag) return;
+
+  const block = event.target.closest('.sim-block');
+  if (!block) {
+    hideSimBlockTip();
+    simClearClashRoute();
+    return;
+  }
+
+  const action = simActionById(block.dataset.actionId);
+  if (!action) return;
+
+  const mark = simActionMarks().get(action.id);
+  showSimBlockTip(event.clientX, event.clientY, simBlockTipParts(action, mark));
+  // El tram que es disputen, ressaltat sobre el diagrama.
+  simShowClashRoute(mark, action);
+});
+
+simLanesHost.addEventListener('mouseleave', () => {
+  if (simDrag) return;
+  hideSimBlockTip();
+  simClearClashRoute();
+});
+
+// ---- Menú del botó dret ----
+simLanesHost.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+
+  const block = event.target.closest('.sim-block');
+  const laneId = simLaneFromPointer(event.clientY);
+  const time = simTimeFromPointer(event.clientX);
+  const items = [];
+
+  if (block) {
+    const id = block.dataset.actionId;
+    if (!simSelection.has(id)) simSetSelection([id]);
+
+    const many = simSelection.size > 1;
+    items.push({ label: many ? `Copia les ${simSelection.size} accions` : 'Copia', action: () => simCopySelection() });
+    items.push({ label: many ? 'Duplica-les' : 'Duplica', action: () => simDuplicateSelection() });
+    items.push({ label: many ? `Elimina les ${simSelection.size}` : 'Elimina', action: () => simDeleteSelection() });
+  } else if (laneId !== null) {
+    items.push({ label: 'Afegeix una acció aquí', action: () => simAddActionAt(laneId, time) });
+  }
+
+  if (simActionClipboard.length && laneId !== null) {
+    items.push({
+      label: simActionClipboard.length > 1 ? `Enganxa ${simActionClipboard.length} accions aquí` : 'Enganxa aquí',
+      action: () => simPasteActions({ laneId, time }),
+    });
+  }
+
+  if (items.length) openContextMenu(event.clientX, event.clientY, items);
+});
+
+// ---- Tecles ----
+// Escoltades al panell i no a la finestra: així només actuen quan s'està
+// treballant aquí dins i no es barallen amb les mateixes tecles del
+// diagrama (Suprimir esborra elements del canvas, Ctrl+C els copia).
+simPanel.addEventListener('keydown', (event) => {
+  if (event.target.closest('input, textarea, select')) return;
+
+  if (event.key === 'Escape') {
+    if (simDrag) {
+      simEndDrag(true);
+      event.stopPropagation();
+      event.preventDefault();
+      return;
+    }
+    if (simSelection.size) {
+      simSetSelection([]);
+      event.stopPropagation();
+      event.preventDefault();
+    }
+    return;
+  }
+
+  if (event.key === 'Delete' || event.key === 'Backspace') {
+    if (!simSelection.size) return;
+    event.preventDefault();
+    event.stopPropagation();
+    simDeleteSelection();
+    return;
+  }
+
+  if (!(event.ctrlKey || event.metaKey)) return;
+  const key = event.key.toLowerCase();
+
+  if (key === 'c' && simSelection.size) {
+    event.preventDefault();
+    event.stopPropagation();
+    simCopySelection();
+  } else if (key === 'v' && simActionClipboard.length) {
+    event.preventDefault();
+    event.stopPropagation();
+    simPasteActions(null);
+  } else if (key === 'd' && simSelection.size) {
+    event.preventDefault();
+    event.stopPropagation();
+    simDuplicateSelection();
+  } else if (key === 'a' && simScenario && simScenario.actions.length) {
+    event.preventDefault();
+    event.stopPropagation();
+    simSetSelection(simScenario.actions.map((action) => action.id));
+  }
 });
 
 // Avançar i retrocedir amb el teclat, per a qui no fa servir el ratolí.
@@ -4564,6 +5515,8 @@ function closeSimPanel() {
   // L'aspecte del diagrama torna exactament al d'abans.
   clearSimVisuals();
   hideSimTip();
+  hideSimBlockTip();
+  simSelection = new Set();
 }
 
 simToggle.addEventListener('click', () => {
@@ -4986,6 +5939,7 @@ function clearSimVisuals() {
   simBarNodes = new Map();
   clearSimFlow();
   clearSimActiveLine();
+  simClearClashRoute();
 }
 
 // ---- Resum ----

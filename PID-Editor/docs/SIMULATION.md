@@ -22,6 +22,9 @@ paral·lel):
   una fila per bomba, accions amb instant d'inici propi, diverses línies
   treballant alhora i detecció de xocs de bomba i de canonada (§3.2, §6.6,
   §8.5, §8.7).
+- **I després** — el **cronograma com a eina d'edició**: les bombolles es
+  mouen, s'allarguen, canvien de fila, es trien, es copien i s'enganxen, i
+  els problemes es marquen a sobre mentre es treballa (§8.5b).
 
 Vegeu [Què NO hi ha](#què-no-hi-ha).
 
@@ -142,6 +145,7 @@ comparteixin cap tram de la instal·lació. Viu a `ProcessModel`
 
 | Camp | Què és |
 | --- | --- |
+| `id` | Identificador **estable**: no canvia mai mentre l'acció existeixi. L'assigna `normalizeSequence()` a qui no en porti. És el que fa servir el cronograma per saber què hi ha triat i què s'està arrossegant (§8.5b); l'`order`, que es renumera a cada moviment, no serviria. |
 | `order` | Número que es veu a la taula i amb què el motor l'anomena als missatges. `normalizeSequence()` el renumera sol. |
 | `type` | Un de `ProcessModel.ACTION_TYPES`: `transport`, `rest` (Descans), `sweep` (Barrido), `startup` (Posada a règim). |
 | `pumpId` | La **bomba bufadora** que fa l'acció (§4b). És la seva fila al cronograma. Buit vol dir «encara sense bomba»: es pot simular igualment, però surt a la fila «Sense bomba». |
@@ -658,6 +662,11 @@ pàgina carrega `process.js` i `simulation.js` **de debò**, no una còpia.
 | `tests/runner.js` | Executor mínim: `Test.group()`, `Test.case()` i les comprovacions. |
 | `tests/simulation.test.js` | Les proves del motor. |
 
+A banda hi ha una bateria de regressió de l'aplicació sencera que es munta
+fora del projecte (carrega `index.html` amb una sonda enganxada al final i
+compta comprovacions). No es desa al repositori perquè depèn de l'entorn de
+qui la munta; el que sí que és al repositori és el que compta: el motor.
+
 Entre els grups n'hi ha dos que guarden les regles del cronograma en
 paral·lel i que **no s'han de deixar caure**: «Accions en paral·lel»
 (diverses línies alhora, suma de cabals des del mateix magatzem i instant
@@ -764,6 +773,125 @@ el bucle i el dit no es barallen.
 
 També respon al teclat: fletxes (±5 s), Re Pàg/Av Pàg (±1 min), Inici i Fi.
 
+### 8.5b El cronograma com a eina d'edició
+
+La seqüència es pot replantejar directament sobre les bombolles, sense
+passar per la taula. **Tot acaba al mateix lloc**: `ProcessModel.setSequence()`.
+El cronograma no calcula res pel seu compte, i per això els quilos surten
+idèntics s'editi per on s'editi.
+
+#### Què es pot fer
+
+| Gest | Què fa |
+| --- | --- |
+| Arrossegar el cos d'una bombolla | canvia **quan comença** |
+| Arrossegar-ne una vora | canvia **quant dura** (l'altra vora es queda) |
+| Arrossegar-la a una altra fila | la canvia **de bomba** |
+| Clic | la tria |
+| Ctrl+clic | l'afegeix o la treu de la tria |
+| Ctrl+C / Ctrl+V / Ctrl+D / Supr | copia, enganxa, duplica, esborra |
+| Ctrl+A | tria totes les accions |
+| Botó dret | menú amb el mateix, més «Afegeix una acció aquí» |
+| Alt mentre es mou | **ajust fi**: s'apaga la graella de temps |
+| Escape | cancel·la l'arrossegament i ho deixa tot com era |
+
+#### Decisions que no són òbvies
+
+**El punter es captura a `#sim-lanes`, no al bloc.** El bloc es destrueix i
+es torna a crear a cada repintat; si la captura hi fos, el primer repintat
+trencaria l'arrossegament. `#sim-lanes` sobreviu a `replaceChildren()`.
+
+**Cada moviment es calcula des de la seqüència d'abans de començar**
+(`drag.origin`), mai des del resultat del moviment anterior. Això és el que
+fa que el resultat depengui només d'on és el ratolí ARA, que tornar al punt
+de partida ho deixi tot exactament com estava, i que apartar una acció es
+desfaci sol si te'n vas.
+
+**L'eix de temps es congela en prémer el botó**, amb un 25 % de marge a la
+dreta. Si es tornés a ajustar a cada moviment, estirar l'última acció cap a
+la dreta faria créixer l'eix, que faria que el mateix píxel volgués dir un
+instant diferent, que la faria créixer una mica més: la bombolla fugiria del
+dit. En prémer **no** es redibuixa el cronograma (només es repinta quin bloc
+està triat, amb `simPaintSelection()`), de manera que un clic per triar no fa
+saltar l'escala.
+
+**Un clic no edita.** Mentre `drag.moved` és fals no s'escriu res al model:
+sense aquesta condició, clicar una acció que comença al minut 2,283 la
+desplaçaria tota sola fins a la graella més propera.
+
+**Un arrossegament sencer és UN sol pas de «desfer».** Mentre dura, els
+canvis passen per `ProcessModel.setSequence()` + `resimulateSequence()`, que
+**no** toquen l'historial; en deixar anar es crida `pushHistory()` un cop.
+Si no s'ha mogut res, o si s'ha cancel·lat amb Escape, no se'n desa cap.
+
+**`resimulateSequence()` recompila canviant només la seqüència**, sense
+tornar a llegir el diagrama. Refer l'escenari sencer (tornar a detectar
+línies, bombes i recorreguts) a cada moviment del ratolí aniria a batzegades
+i no cal: mentre s'arrossega una bombolla, del diagrama no se'n mou res.
+
+**La graella de temps s'adapta al zoom**: es tria la més fina de
+`SIM_SNAP_STEPS` que encara ocupi uns 8 px a la pantalla. A més, les vores de
+les altres accions fan d'imant dins d'uns 7 px: encadenar-ne dues és el que
+més es fa, i així n'hi ha prou d'acostar-les.
+
+**Dins d'una fila dues accions no se solapen mai.** Ho garanteix
+`simLayoutSequence()`: les arrossegades es queden on les deixes i la resta
+s'aparten **cap endavant**, en cascada. S'empeny i no s'intercanvia perquè
+empènyer conserva l'ordre en què l'usuari havia pensat les coses; i només
+cap endavant, perquè fer-les recular ompliria forats que hi són a posta
+(esperes entre tandes).
+
+**Canviar de fila es pot rebutjar.** Si la bomba de destí no pot fer
+funcionar la línia de l'acció (`line.pumpIds`), la fila es marca en vermell,
+l'etiqueta flotant en diu el motiu i en deixar anar l'acció es queda on era.
+La fila «Sense bomba» ho accepta tot.
+
+**Moure'n diverses alhora** desplaça totes les triades el mateix temps.
+El canvi de fila només es permet amb una acció sola: amb diverses, què
+voldria dir «aquesta fila» no és evident, i endevinar-ho seria pitjor que no
+fer-ho.
+
+**Enganxar no trepitja res.** Cada acció torna a la seva bomba (o a la fila
+apuntada, si només n'hi ha una) i es col·loca al **primer forat lliure** a
+partir d'allà (`simFirstFreeSlot()`), conservant la distància que hi havia
+entre les copiades. Si una va a parar a una bomba que no pot fer la seva
+línia, s'avisa i **no** es col·loca.
+
+### 8.5c Els dos marcatges de problema
+
+Són **deliberadament diferents**, perquè d'una ullada es vegi de quina mena
+és el problema. Tots dos surten del resultat del motor (`simActionMarks()`);
+aquí no es decideix res, només com pintar-ho.
+
+| | Xoc de canonada o de bomba | Falta de producte |
+| --- | --- | --- |
+| Marca | ratllat **diagonal vermell** sobre tot el bloc | ratllat **vertical ocre** sobre **el tros que es queda sense res** |
+| Color | `--ui-danger` | `--ui-warn` |
+| Classes | `.sim-block--conflict`, fila `tr.is-conflict` | `.sim-block--dry` (+ `--dry-all`), fila `tr.is-dry` |
+| Play | **bloquejat** | **no** es bloqueja |
+| Per què | dues coses alhora pel mateix lloc és impossible | quedar-se sense producte és una situació física real i el motor la sap tractar |
+
+L'acció que **no pot ni començar** porta `--dry-all` i queda ratllada
+sencera; la que **es queda a mitges** només ho està a partir de l'instant en
+què el magatzem es buida, que surt del final de l'últim tram en què la seva
+línia encara movia alguna cosa.
+
+En passar el ratolí per sobre d'una bombolla surt l'explicació sencera
+(`#sim-block-tip`): què és, de quin minut a quin, i el problema en llenguatge
+planer. Als xocs el text el dona el **motor** (és el mateix que surt a la
+safata d'avisos); a la falta de producte s'hi diu quants quilos calien,
+quants n'hi havia i en quin minut s'esgota. Si el problema és un xoc de
+canonada, **el tram compartit es ressalta també sobre el diagrama**
+(`.pipe-path--clash` i `.pid-element--clash`), i es desmarca en treure el
+ratolí.
+
+Hi ha una **llegenda** fixa sota el cronograma amb el significat de cada
+marca i els gestos principals, perquè no calgui recordar-se'n.
+
+**Limitació coneguda:** mentre hi ha un xoc, el motor no calcula res, i per
+tant no es pot saber si a més hi hauria falta de producte. Primer es resol
+el xoc i llavors apareix l'altre avís, si n'hi ha.
+
 ### 8.6 Què es repinta i quan
 
 | Funció | Quan | Què fa |
@@ -773,6 +901,8 @@ També respon al teclat: fletxes (±5 s), Re Pàg/Av Pàg (±1 min), Inici i Fi.
 | `renderSimTimeline()` | a cada compilació | blocs i marques del cronograma |
 | `buildSimStateShell()` | a cada compilació | les files de l'estat del sistema, buides |
 | `renderSimNow()` | **a cada imatge** | rellotge, cursor, acció actual i valors |
+| `resimulateSequence()` | a cada moviment d'un arrossegament | recompila **només** amb la seqüència nova i repinta avisos, taula i cronograma |
+| `simPaintSelection()` | en clicar una bombolla | només afegeix i treu la classe de triat: no mou res de lloc |
 
 `renderSimNow()` és l'única que s'executa seixanta cops per segon, i només
 canvia **textos** de nodes que ja existeixen (`simFactNodes`,
@@ -811,6 +941,11 @@ Les columnes són `#`, `Bomba`, `Acció`, `Línia`, `Inici`, `Durada`,
   vol dir ningú quan només toca una durada. Les accions de les **altres**
   bombes no es mouen: cada fila és independent.
 - **Inici i durada s'escriuen en minuts i es desen en segons.**
+- **Al costat de la durada hi va el minut en què l'acció acaba**, en gris i
+  sense poder-s'hi escriure (`.sim-row__ends`). L'encapçalament diu «Dura» i
+  no «Durada» pel mateix motiu: la primera vegada, «Inici 0 / Durada 5» es
+  pot llegir com «del minut 0 al 5», i amb «acaba al 5 min» a la vista el
+  dubte desapareix sol.
 
 #### Xocs: com es marquen i com es resolen
 
@@ -1197,10 +1332,28 @@ la configuració d'una línia n'actualitzi el text **sense** refer la detecció
     durades era correcte quan tot anava en fila; ara ja no ho és.
 23. **Una seqüència antiga ha de continuar fent el mateix.** Qualsevol canvi
     a la conversió de §10 s'ha de comprovar amb un arxiu de debò.
+24. **El cronograma és una altra manera d'editar, no un càlcul paral·lel.**
+    Tot el que s'hi fa passa per `ProcessModel.setSequence()` i pel motor.
+    Els quilos han de sortir idèntics s'editi per on s'editi, i hi ha una
+    prova que ho comprova.
+25. **Un arrossegament és un sol pas de «desfer»**, i un clic no n'és cap.
+26. **L'`id` d'una acció no es pot derivar de l'`order`.** L'ordre canvia
+    cada cop que una acció es mou en el temps; l'identificador, mai.
+27. **Els dos marcatges de problema no es poden assemblar** (§8.5c): un
+    bloqueja la reproducció i l'altre no, i confondre'ls és fer prendre una
+    situació normal per una d'impossible.
 
 ---
 
 ## 13. Paranys coneguts
+
+- **No capturis el punter al bloc del cronograma.** Es destrueix a cada
+  repintat. La captura va a `#sim-lanes` (§8.5b).
+- **No redibuixis el cronograma en prémer el botó del ratolí**: l'escala de
+  temps es congela en aquell moment i el dibuix faria un salt visible a cada
+  clic.
+- **No apliquis la graella de temps fins que el ratolí no s'hagi mogut de
+  debò**, o clicar una acció la desplaçarà.
 
 - **`clearAll()` reinicia `elementCount` a 0**, de manera que un element nou
   podria rebre l'identificador d'un d'esborrat. Per això `clearAll()` també

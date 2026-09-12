@@ -36,6 +36,10 @@
   --ui-hover: #f0f5f8;
   --ui-danger: #b4271d;
   --ui-danger-soft: #fbeeed;
+  /* Avís (no error): falta de producte. Ocre, deliberadament diferent del
+     vermell dels xocs de canonada, que sí que bloquegen. */
+  --ui-warn: #9a6b12;
+  --ui-warn-soft: #fdf4e4;
 
   /* ---- Diagrama: color (NO TOCAR) ---- */
   --pid-input: #c3624a;       /* punts d'entrada */
@@ -1420,14 +1424,109 @@ select.process-field__input {
   font-size: 11px;
   line-height: 1.2;
   white-space: nowrap;
-  pointer-events: none;
+  /* Els blocs són l'eina d'edició: han de rebre el ratolí. Qui mou el
+     cursor de temps és la pista buida del voltant. */
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
 
-/* Acció que xoca amb una altra: no es pot reproduir fins que no es mogui. */
+.sim-block:focus-visible {
+  outline: 2px solid var(--ui-primary-dark);
+  outline-offset: 1px;
+}
+
+/* Acció triada: es veu amb un traç més gruixut i una ombra curta, sense
+   canviar-ne el color, que ja vol dir una altra cosa. */
+.sim-block--selected {
+  box-shadow: 0 0 0 2px var(--ui-primary-dark);
+  z-index: 2;
+}
+
+/* La que s'està arrossegant ara mateix. */
+.sim-block--dragging {
+  cursor: grabbing;
+  opacity: 0.92;
+  z-index: 3;
+}
+
+/* Vores per allargar i escurçar. Amples de debò encara que es vegin
+   estretes: agafar-les ha de ser fàcil. */
+.sim-block__grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+}
+
+.sim-block__grip--start { left: -1px; }
+.sim-block__grip--end { right: -1px; }
+
+.sim-block:hover .sim-block__grip::before {
+  content: '';
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.5;
+}
+
+/* Un bloc molt curt no té lloc per a dues nanses i el text: es deixa
+   només moure, que és el que s'hi pot fer còmodament. */
+.sim-block--tiny .sim-block__grip { display: none; }
+.sim-block--tiny { padding: 0 2px; }
+
+/* Acció que xoca amb una altra: no es pot reproduir fins que no es mogui.
+   Ratllat diagonal vermell a sobre de tot el bloc. */
 .sim-block--conflict {
   border-color: var(--ui-danger);
   background: var(--ui-danger-soft);
   color: var(--ui-danger);
+}
+
+.sim-block--conflict::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(180, 39, 29, 0.28) 0 4px,
+    rgba(180, 39, 29, 0) 4px 9px
+  );
+  pointer-events: none;
+}
+
+/* Falta de producte: ratllat VERTICAL i ocre, perquè d'una ullada es vegi
+   que el problema no és el mateix que el dels xocs. Només cobreix el tros
+   d'acció que es queda sense res a moure; si l'acció no pot ni començar,
+   el cobreix sencer. */
+.sim-block--dry {
+  border-color: var(--ui-warn);
+  color: var(--ui-warn);
+}
+
+.sim-block__dry {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(154, 107, 18, 0.38) 0 2px,
+    rgba(154, 107, 18, 0) 2px 6px
+  );
+  border-left: 1px dashed var(--ui-warn);
+  pointer-events: none;
+}
+
+.sim-block--dry-all {
+  background: var(--ui-warn-soft);
 }
 
 /* Les accions que no mouen producte es distingeixen sense fer servir cap
@@ -1454,15 +1553,123 @@ select.process-field__input {
 }
 
 .sim-block__name {
+  position: relative;
+  z-index: 1;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
+  pointer-events: none;
 }
 
 .sim-block__line {
+  position: relative;
+  z-index: 1;
   overflow: hidden;
   text-overflow: ellipsis;
+  pointer-events: none;
 }
+
+/* La pista sencera accepta que s'hi deixi anar un bloc; la de sota del
+   ratolí mentre s'arrossega es marca perquè es vegi on anirà a parar. */
+.sim-lane--drop .sim-lane__track {
+  border-color: var(--ui-primary);
+  box-shadow: inset 0 0 0 1px var(--ui-primary-soft);
+}
+
+/* Fila on NO es pot deixar anar: aquella bomba no pot fer funcionar la
+   línia de l'acció. */
+.sim-lane--refuse .sim-lane__track {
+  border-color: var(--ui-danger);
+}
+
+/* ---- Llegenda del cronograma ---- */
+.sim-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+  flex: none;
+  padding: 0 var(--space-4) var(--space-2);
+  color: var(--ui-text-muted);
+  font-size: 11px;
+}
+
+.sim-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.sim-legend__swatch {
+  width: 18px;
+  height: 11px;
+  border-radius: 2px;
+  border: 1px solid var(--ui-primary);
+  background: var(--ui-primary-soft);
+}
+
+.sim-legend__swatch--idle {
+  background: var(--ui-sunken);
+  border-color: var(--ui-border-strong);
+}
+
+.sim-legend__swatch--clash {
+  border-color: var(--ui-danger);
+  background:
+    repeating-linear-gradient(45deg, rgba(180, 39, 29, 0.28) 0 4px, rgba(180, 39, 29, 0) 4px 9px),
+    var(--ui-danger-soft);
+}
+
+.sim-legend__swatch--dry {
+  border-color: var(--ui-warn);
+  background:
+    repeating-linear-gradient(90deg, rgba(154, 107, 18, 0.38) 0 2px, rgba(154, 107, 18, 0) 2px 6px),
+    var(--ui-warn-soft);
+}
+
+.sim-legend__hint {
+  margin-left: auto;
+  text-align: right;
+}
+
+/* ---- Etiqueta flotant: números mentre s'arrossega i explicació dels
+   problemes en passar el ratolí per sobre d'un bloc ---- */
+.sim-block-tip {
+  position: fixed;
+  z-index: 60;
+  max-width: 22rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--ui-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--ui-surface);
+  box-shadow: var(--shadow-popover);
+  color: var(--ui-text);
+  font-size: 11px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.sim-block-tip[hidden] { display: none; }
+
+.sim-block-tip__head {
+  margin: 0 0 2px;
+  font-weight: 600;
+}
+
+.sim-block-tip__numbers {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-block-tip__problem {
+  margin: var(--space-1) 0 0;
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--ui-border);
+  white-space: normal;
+}
+
+.sim-block-tip__problem--clash { color: var(--ui-danger); }
+.sim-block-tip__problem--dry { color: var(--ui-warn); }
 
 /* El cursor travessa totes les files. Es col·loca a partir de l'amplada de
    la columna d'etiquetes, que és la mateixa per a totes. */
@@ -1486,6 +1693,17 @@ select.process-field__input {
   transform: translateX(-50%);
   border-radius: 0 0 3px 3px;
   background: var(--ui-primary-dark);
+}
+
+/* Tram de la instal.lació que dues accions simultànies es disputen. Es
+   veu mentre el ratolí és sobre el bloc que xoca, i prou. */
+.pipe-path--clash {
+  stroke: var(--ui-danger);
+  stroke-width: 5;
+}
+
+.pid-element--clash {
+  filter: drop-shadow(0 0 2px var(--ui-danger)) drop-shadow(0 0 7px var(--ui-danger));
 }
 
 /* ---- Les tres columnes ---- */
@@ -1555,7 +1773,7 @@ select.process-field__input {
 }
 
 .sim-table td {
-  padding: var(--space-1) var(--space-2);
+  padding: 2px var(--space-2);
   border-bottom: 1px solid var(--ui-border);
   vertical-align: middle;
 }
@@ -1604,8 +1822,8 @@ select.process-field__input {
 }
 
 .sim-table .process-field__input {
-  height: 26px;
-  min-width: 5.5rem;
+  height: 24px;
+  min-width: 4.6rem;
   padding: 0 var(--space-2);
   font-size: var(--size-small);
 }
@@ -1623,7 +1841,17 @@ select.process-field__input {
 }
 
 .sim-row__duration .process-field__input {
-  width: 4.2rem;
+  width: 3.6rem;
+  min-width: 3.6rem;
+}
+
+/* PUNT 1.2: al costat de la durada hi va, en gris i sense poder-s'hi
+   escriure, el minut en què l'acció acaba. Així no hi ha manera
+   d'entendre que la casella demana l'instant final. */
+.sim-row__ends {
+  color: var(--ui-text-muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .sim-row__unit {
@@ -1636,16 +1864,25 @@ select.process-field__input {
   min-width: 8rem;
   color: var(--ui-text-secondary);
   font-size: 11px;
-  line-height: 1.3;
+  line-height: 1.25;
 }
 
 .sim-row__estimate--short {
   color: var(--ui-danger);
 }
 
+/* Falta de producte: avís, no error. Color propi. */
+.sim-row__estimate--dry {
+  color: var(--ui-warn);
+}
+
+.sim-table tr.is-dry td {
+  background: var(--ui-warn-soft);
+}
+
 .sim-icon-btn {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: none;
   border-radius: var(--radius-sm);
